@@ -214,15 +214,6 @@ jobs:
       - name: List release files
         run: find artifacts -type f | sort
 
-      # 签名脚本生成 koma-update-manifest.json + .sig（ed25519，纯 Node 标准库）
-      - name: Sign update manifest (ed25519)
-        env:
-          ASSETS_DIR: ${{ github.workspace }}/artifacts
-          APP_VERSION: ${{ needs.prepare.outputs.semver }}
-          CHANNEL: stable
-          KOMA_UPDATE_SIGN_KEY: ${{ secrets.KOMA_UPDATE_SIGN_KEY }}
-        run: node scripts/sign-update-manifest.cjs
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

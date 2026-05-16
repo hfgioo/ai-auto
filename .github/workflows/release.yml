@@ -173,19 +173,9 @@ jobs:
         id: ver
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Sign update manifest
-        env:
-          ASSETS_DIR: ${{ github.workspace }}/artifacts
-          APP_VERSION: ${{ steps.ver.outputs.version }}
-          CHANNEL: stable
-          KOMA_UPDATE_SIGN_KEY: ${{ secrets.KOMA_UPDATE_SIGN_KEY }}
-        run: node scripts/sign-update-manifest.cjs
-
-      - name: Create GitHub Release on M-JYuan/Koma
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          repository: M-JYuan/Koma
-          token: ${{ secrets.GH_TOKEN }}
           tag_name: ${{ github.ref_name }}
           draft: false
           generate_release_notes: true
