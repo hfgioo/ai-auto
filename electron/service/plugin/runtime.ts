@@ -42,7 +42,6 @@ import type {
   ChannelConfigInput,
 } from '../settings/ChannelConfigService';
 import type { MediaCategory } from '../storage/repositories/settingsInterfaces';
-import { readActivationInfo } from '../settings/activationKey';
 
 // 仅作为兼容迁移来源：旧版插件配置文件（provider-configs.json）。
 class LegacyProviderConfigStore {
@@ -624,11 +623,6 @@ class ElectronPluginRuntime extends EventEmitter {
         info: (...args) => console.info(`[Plugin:${pluginId}]`, ...args),
         warn: (...args) => console.warn(`[Plugin:${pluginId}]`, ...args),
         error: (...args) => console.error(`[Plugin:${pluginId}]`, ...args),
-      },
-
-      activation: {
-        getApiKey: async () => readActivationInfo()?.apiKey || null,
-        getInfo: async () => readActivationInfo(),
       },
     };
   }

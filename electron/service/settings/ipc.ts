@@ -34,10 +34,8 @@ import {
   getMediaDefault,
   listMediaDefaults,
   deleteMediaDefault,
-  reconcileActivationChannels,
 } from './ChannelConfigService';
 import { SqliteAppSettingsKvRepository } from '../storage/repositories/SqliteAppSettingsKvRepository';
-import { readActivationApiKey } from './activationKey';
 
 function ok<T>(data: T) {
   return { ok: true as const, data };
@@ -154,31 +152,6 @@ export function registerSettingsIpc(): void {
     },
   );
 
-  // 激活渠道补齐：用于已激活老用户启动后，把新增的 koma-activation 管理渠道（如 itvJimeng）
-  // 自动注册出来。前端不持有明文 apiKey，主进程从已存在的同批管理渠道里解密继承。
-  ipcMain.handle(
-    'channel:reconcileActivation',
-    async (
-      _e,
-      args: { configs: ChannelConfigInput[]; sourceChannelIds: string[] },
-    ) => {
-      try {
-        await ensureServicesReady();
-        const result = reconcileActivationChannels(
-          args.configs ?? [],
-          args.sourceChannelIds ?? [],
-        );
-        if (result.length > 0) {
-          broadcastChannelChanged({ type: 'reconcile', count: result.length });
-        }
-        return ok(result);
-      } catch (err: any) {
-        logger.error('[channel:reconcileActivation]', err);
-        return fail('RECONCILE_ERROR', err.message ?? String(err));
-      }
-    },
-  );
-
   ipcMain.handle(
     'channel:setDefault',
     async (
@@ -261,16 +234,6 @@ export function registerSettingsIpc(): void {
     } catch (err: any) {
       logger.error('[app-kv:delete]', err);
       return fail('KV_DELETE_ERROR', err.message ?? String(err));
-    }
-  });
-
-  ipcMain.handle('activation:get-api-key', async () => {
-    try {
-      await ensureServicesReady();
-      return ok({ apiKey: readActivationApiKey() });
-    } catch (err: any) {
-      logger.error('[activation:get-api-key]', err);
-      return fail('ACTIVATION_GET_KEY_ERROR', err.message ?? String(err));
     }
   });
 }

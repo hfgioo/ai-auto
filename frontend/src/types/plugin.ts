@@ -265,24 +265,6 @@ export interface PluginAPI {
     registerMenuItem(item: MenuItem): void;
     removeMenuItem(key: string): void;
   };
-
-  // 激活信息 —— 内置渠道（请求 https://komaapi.com）用它取激活 Key
-  activation: {
-    getApiKey(): Promise<string | null>;
-    getInfo(): Promise<ActivationInfo | null>;
-  };
-}
-
-// 激活信息（不含明文 apiKey；要拿明文请用 api.activation.getApiKey()）
-export interface ActivationInfo {
-  activatedAt: number;
-  lastValidatedAt: number;
-  maskedKey: string;
-  defaultChannelIds: {
-    llm: string;
-    tti: string;
-    itv: string;
-  };
 }
 
 // 插件导出接口

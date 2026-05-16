@@ -262,23 +262,6 @@ export async function bulkImportChannels(
   return invoke<{ imported: number }>('channel:bulkImport', { configs });
 }
 
-/**
- * 激活渠道补齐：用于已激活老用户启动后，把新增的 koma-activation 管理渠道
- * （如 itvJimeng）自动注册出来。前端不持有明文 apiKey，主进程从 sourceChannelIds
- * 列表里第一个能解密出 apiKey 的渠道继承密钥再加密落库到目标渠道。
- */
-export async function reconcileActivationChannels(
-  cfgs: Array<Omit<ChannelConfig, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }>,
-  sourceChannelIds: string[],
-): Promise<ChannelConfig[]> {
-  const inputs = cfgs.map(frontendToInput);
-  const dtos = await invoke<ChannelConfigDTO[]>('channel:reconcileActivation', {
-    configs: inputs,
-    sourceChannelIds,
-  });
-  return dtos.map(dtoToFrontend);
-}
-
 /* --- Media Defaults --- */
 
 export async function getMediaDefault(category: MediaCategory): Promise<MediaModelSelection | null> {

@@ -10,7 +10,6 @@ import { ChatRenderer } from '../../chat';
 import { useChat, chatIPC } from '../../chat/ipc';
 import type { SessionConfig, ContentPart, ChatMessage } from '../../chat/ipc';
 import { loadSettings } from '../../store/globalStore';
-import { activationService } from '../../services/activationService';
 import { useChatHistoryStore } from '../../store/chatHistoryStore';
 import { saveMCPServers } from '../../store/settings/chatSettings';
 import type { AppSettings } from '../../types';
@@ -105,14 +104,13 @@ export const ChatPage: React.FC = () => {
   useEffect(() => {
     const loadConfigs = async () => {
       try {
-        const activationInfo = await activationService.getActivationInfo();
         const settings = await loadSettings();
         setSettings(settings);
         const options = listConfiguredModelSelectOptions(settings, 'llm', 'llm.chat');
         setLlmOptions(options);
         setMcpConfigs((settings as any).mcpServers || []);
 
-        const activeSelection = resolveInitialChatLLMSelection(settings, activationInfo);
+        const activeSelection = resolveInitialChatLLMSelection(settings);
         const activeSelectionKey = serializeMediaSelection(activeSelection);
         if (activeSelectionKey) {
           setSelectedSelectionKey(activeSelectionKey);

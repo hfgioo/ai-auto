@@ -306,18 +306,6 @@ export interface ElectronPluginAPI {
     warn: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
   };
-
-  // 激活信息 —— 内置渠道（请求 https://komaapi.com）用它取激活 Key
-  activation: {
-    getApiKey: () => Promise<string | null>;
-    getInfo: () => Promise<ActivationInfo | null>;
-  };
-}
-
-export interface ActivationInfo {
-  apiKey: string;
-  activatedAt: number;
-  lastValidatedAt: number;
 }
 
 // 子进程选项

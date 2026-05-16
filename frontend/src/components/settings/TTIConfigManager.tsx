@@ -54,10 +54,6 @@ import {
 } from './channelManagerShared';
 import { useMediaConfigManager } from './useMediaConfigManager';
 import { getSuggestedTTIFieldDefaults } from './ttiProviderSuggestions';
-import {
-  isKomaActivationManagedChannel,
-  withKomaActivationChannelMarker,
-} from '../../utils/activationManagedChannels';
 
 interface TTIConfigManagerProps {
   onConfigChange?: () => void;
@@ -140,8 +136,7 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
 
   const showChannelConfigCreateEntry = import.meta.env.DEV;
   const watchedProviderType = Form.useWatch('providerType', form) as string | undefined;
-  const isEditingActivationChannel = isKomaActivationManagedChannel(editingChannel);
-  const currentProviderType = isEditingActivationChannel ? editingChannel?.providerType : watchedProviderType;
+  const currentProviderType = watchedProviderType;
   const editingHasStoredApiKey = Boolean(editingChannel && (editingChannel.providerConfig as Record<string, unknown> | undefined)?.hasApiKey);
   const watchedModels = Form.useWatch('models', form) as Array<Partial<ChannelModelDefinition>> | undefined;
   const modelOptions = useMemo(() => (
@@ -263,10 +258,7 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
   const handleSave = useCallback(async () => {
     try {
       const values = await form.validateFields();
-      const isActivationChannel = isKomaActivationManagedChannel(editingChannel);
-      const effectiveProviderType = isActivationChannel && editingChannel
-        ? editingChannel.providerType
-        : values.providerType;
+      const effectiveProviderType = values.providerType;
       const definition = definitionMap.get(effectiveProviderType);
       if (!definition) {
         throw new Error('未找到对应的图片渠道定义');
@@ -279,27 +271,18 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
         : models[0]?.id;
       if (!defaultModelId) throw new Error('请至少添加一个模型');
 
-      const providerConfig = isActivationChannel && editingChannel
-        ? withKomaActivationChannelMarker({
-            baseUrl: editingChannel.providerConfig?.baseUrl,
-            promptProtocol: values.promptProtocol || undefined,
-            defaultSize: values.defaultSize || undefined,
-            defaultSteps: values.defaultSteps || undefined,
-            workflowPath: workflowData.workflowPath,
-            workflowMapping: workflowData.workflowMapping,
-          })
-        : {
-            baseUrl: values.baseUrl,
-            apiKey: values.apiKey,
-            promptProtocol: values.promptProtocol || undefined,
-            defaultSize: values.defaultSize || undefined,
-            defaultSteps: values.defaultSteps || undefined,
-            workflowPath: workflowData.workflowPath,
-            workflowMapping: workflowData.workflowMapping,
-          };
+      const providerConfig = {
+        baseUrl: values.baseUrl,
+        apiKey: values.apiKey,
+        promptProtocol: values.promptProtocol || undefined,
+        defaultSize: values.defaultSize || undefined,
+        defaultSteps: values.defaultSteps || undefined,
+        workflowPath: workflowData.workflowPath,
+        workflowMapping: workflowData.workflowMapping,
+      };
 
       const payload = {
-        name: isActivationChannel && editingChannel ? editingChannel.name : values.name,
+        name: values.name,
         description: definition.description,
         category: 'tti' as const,
         providerType: effectiveProviderType,
@@ -309,7 +292,6 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
         enabled: true,
         source: 'builtin' as const,
       };
-
       const saved = editingChannel
         ? await updateChannelConfig(editingChannel.id, payload)
         : await addChannelConfig(payload);
@@ -619,13 +601,12 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
               <Form.Item
                 name="providerType"
                 label="模型渠道"
-                required={!isEditingActivationChannel}
-                rules={[{ required: !isEditingActivationChannel, message: '请选择模型渠道' }]}
+                required
+                rules={[{ required: true, message: '请选择模型渠道' }]}
               >
                 <Select
                   placeholder={t('settings.selectTTIProvider')}
                   onChange={handleProviderChange}
-                  disabled={isEditingActivationChannel}
                 >
                   {channelDefinitions.map((definition) => (
                     <Select.Option key={definition.id} value={definition.id}>
@@ -638,10 +619,10 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
               <Form.Item
                 name="name"
                 label={t('settings.configName')}
-                required={!isEditingActivationChannel}
-                rules={[{ required: !isEditingActivationChannel, message: `${t('settings.pleaseEnter')} ${t('settings.configName')}` }]}
+                required
+                rules={[{ required: true, message: `${t('settings.pleaseEnter')} ${t('settings.configName')}` }]}
               >
-                <Input placeholder={t('settings.configNamePlaceholder')} disabled={isEditingActivationChannel} />
+                <Input placeholder={t('settings.configNamePlaceholder')} />
               </Form.Item>
             </div>
           </div>
@@ -695,13 +676,12 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
                   name="apiKey"
                   label={t('settings.apiKey')}
                   rules={[{
-                    required: currentProviderType !== 'comfyui' && !editingHasStoredApiKey && !isEditingActivationChannel,
+                    required: currentProviderType !== 'comfyui' && !editingHasStoredApiKey,
                     message: `${t('settings.pleaseEnter')} ${t('settings.apiKey')}`,
                   }]}
                 >
                   <Input.Password
                     placeholder={editingHasStoredApiKey ? t('settings.apiKeyStoredPlaceholder') : t('settings.enterApiKey')}
-                    disabled={isEditingActivationChannel}
                   />
                 </Form.Item>
               )}
@@ -709,9 +689,9 @@ export const TTIConfigManager: React.FC<TTIConfigManagerProps> = ({ onConfigChan
               <Form.Item
                 name="baseUrl"
                 label={t('settings.apiAddress')}
-                rules={[{ required: !isEditingActivationChannel, message: `${t('settings.pleaseEnter')} ${t('settings.apiAddress')}` }]}
+                rules={[{ required: true, message: `${t('settings.pleaseEnter')} ${t('settings.apiAddress')}` }]}
               >
-                <Input placeholder="http://127.0.0.1:8188" disabled={isEditingActivationChannel} />
+                <Input placeholder="http://127.0.0.1:8188" />
               </Form.Item>
 
               <Form.Item name="defaultSize" label={t('settings.defaultSize')}>

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivationInfo } from '../../services/activationService';
 import type { AppSettings } from '../../types';
 import type { ModelCapability } from '../../providers/channel/types';
 import {
@@ -14,22 +13,7 @@ import {
   resolveInitialChatLLMSelection,
 } from './chatPageUtils';
 
-const KOMA_OFFICIAL_LLM_CHANNEL_ID = 'komaapi-default-llm';
-
-function createActivationInfo(): ActivationInfo {
-  return {
-    activatedAt: 1,
-    lastValidatedAt: 2,
-    maskedKey: 'sk-***',
-    defaultChannelIds: {
-      llm: KOMA_OFFICIAL_LLM_CHANNEL_ID,
-      tti: 'komaapi-default-tti',
-      itv: 'komaapi-default-itv',
-    },
-  };
-}
-
-function createSettings(options?: { officialEnabled?: boolean; officialModelCapabilities?: ModelCapability[] }): AppSettings {
+function createSettings(options?: { defaultEnabled?: boolean; defaultModelCapabilities?: ModelCapability[] }): AppSettings {
   return {
     channelConfigs: [
       {
@@ -47,36 +31,13 @@ function createSettings(options?: { officialEnabled?: boolean; officialModelCapa
             id: 'gpt-4o',
             label: 'gpt-4o',
             providerModelName: 'gpt-4o',
-            capabilities: ['llm.chat'],
+            capabilities: options?.defaultModelCapabilities ?? ['llm.chat'],
           },
         ],
-        enabled: true,
+        enabled: options?.defaultEnabled ?? true,
         source: 'builtin',
         createdAt: 1,
         updatedAt: 1,
-      },
-      {
-        id: KOMA_OFFICIAL_LLM_CHANNEL_ID,
-        name: 'Koma官方',
-        category: 'llm',
-        providerType: 'openai',
-        providerConfig: {
-          baseUrl: 'https://komaapi.com/v1',
-          hasApiKey: true,
-        },
-        defaultModelId: 'glm-5',
-        models: [
-          {
-            id: 'glm-5',
-            label: 'glm-5',
-            providerModelName: 'glm-5',
-            capabilities: options?.officialModelCapabilities ?? ['llm.chat'],
-          },
-        ],
-        enabled: options?.officialEnabled ?? true,
-        source: 'builtin',
-        createdAt: 2,
-        updatedAt: 2,
       },
     ],
     mediaDefaults: {
@@ -90,44 +51,42 @@ function createSettings(options?: { officialEnabled?: boolean; officialModelCapa
 }
 
 describe('chatPageUtils', () => {
-  it('激活信息存在且官方 LLM 渠道可用时，初始选择优先于旧 OpenAI 默认', () => {
+  it('使用 settings.mediaDefaults.llm 作为初始选择', () => {
     const settings = createSettings();
-    const selection = resolveInitialChatLLMSelection(settings, createActivationInfo());
+    const selection = resolveInitialChatLLMSelection(settings);
 
-    expect(serializeMediaSelection(selection)).toBe('komaapi-default-llm::glm-5');
+    expect(serializeMediaSelection(selection)).toBe('legacy-openai::gpt-4o');
 
     const context = resolveConfiguredChannelModel(settings, 'llm', selection, 'llm.chat');
     expect(context).toBeDefined();
 
     const selectedConfig = buildLLMConfigFromContext(context!);
-    expect(selectedConfig.profileId).toBe(KOMA_OFFICIAL_LLM_CHANNEL_ID);
-    expect(selectedConfig.baseUrl).toBe('https://komaapi.com/v1');
+    expect(selectedConfig.profileId).toBe('legacy-openai');
+    expect(selectedConfig.baseUrl).toBe('https://api.openai.com/v1');
 
     const sessionConfig = buildChatSessionConfig(selectedConfig);
     expect(sessionConfig).toMatchObject({
-      llmProfileId: KOMA_OFFICIAL_LLM_CHANNEL_ID,
+      llmProfileId: 'legacy-openai',
       modelProvider: 'openai-compatible',
-      modelName: 'glm-5',
-      baseUrl: 'https://komaapi.com/v1',
+      modelName: 'gpt-4o',
+      baseUrl: 'https://api.openai.com/v1',
     });
   });
 
-  it('官方渠道不可用时回退现有默认 LLM 选择', () => {
+  it('默认渠道不可用时返回 undefined', () => {
     const selection = resolveInitialChatLLMSelection(
-      createSettings({ officialEnabled: false }),
-      createActivationInfo(),
+      createSettings({ defaultEnabled: false }),
     );
 
-    expect(serializeMediaSelection(selection)).toBe('legacy-openai::gpt-4o');
+    expect(serializeMediaSelection(selection)).toBeUndefined();
   });
 
-  it('官方渠道模型不支持 llm.chat 时回退现有默认 LLM 选择', () => {
+  it('默认渠道模型不支持 llm.chat 时返回 undefined', () => {
     const selection = resolveInitialChatLLMSelection(
-      createSettings({ officialModelCapabilities: [] }),
-      createActivationInfo(),
+      createSettings({ defaultModelCapabilities: [] }),
     );
 
-    expect(serializeMediaSelection(selection)).toBe('legacy-openai::gpt-4o');
+    expect(serializeMediaSelection(selection)).toBeUndefined();
   });
 
   it('鉴权错误显示友好提示且不保留 API Key', () => {

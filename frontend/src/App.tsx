@@ -23,8 +23,7 @@ import {
   USER_INTERRUPTED_REASON,
 } from './store/projectOpenService';
 import { loadCharacters, loadScenes, loadProps, loadShots, loadEpisodeShots, saveEpisode, createEpisode } from './store/projectStore';
-import { Spin, App as AntApp, Button, Input, Typography } from 'antd';
-import { KeyOutlined } from '@ant-design/icons';
+import { Spin, App as AntApp, Button } from 'antd';
 import {
   DEV_TEST_PROJECT,
   DEV_TEST_ANALYSIS,
@@ -35,17 +34,12 @@ import {
 import { getThumbnailUrl } from './constants/dimensions';
 import { createLogger } from './store/logger';
 import { loadSettings } from './store/globalStore';
-import { activationService, ActivationInfo } from './services/activationService';
-import { electronService } from './services/electronService';
 import { listEditorStepIds } from './workflow/editorStepRegistry';
 import { resolveConfiguredChannelModel, serializeMediaSelection } from './providers/channel/resolver';
 import {
   getDurationSpecForModel,
   getDurationSpecForProviderType,
 } from './providers/itv/durationSpec';
-import { useTranslation } from 'react-i18next';
-
-const { Text } = Typography;
 
 const logger = createLogger('App');
 
@@ -108,26 +102,11 @@ function isDisplayableProject(project: unknown): project is NonNullable<ReturnTy
 
 const AppContent: React.FC = () => {
   const { message } = AntApp.useApp();
-  const { t } = useTranslation();
 
   // 开发模式检测
   const urlParams = new URLSearchParams(window.location.search);
   const devMode = urlParams.get('dev');
   const isVideoDevMode = devMode === 'video';
-
-  // 激活状态
-  const [activationInfo, setActivationInfo] = useState<ActivationInfo | null>(null);
-  const [activationLoading, setActivationLoading] = useState(true);
-  const [activationInputKey, setActivationInputKey] = useState('');
-  const [activationVerifying, setActivationVerifying] = useState(false);
-
-  useEffect(() => {
-    activationService.getActivationInfo()
-      .then(info => setActivationInfo(info))
-      .finally(() => setActivationLoading(false));
-  }, []);
-
-  const activationLocked = !activationLoading && !activationInfo;
 
   // 项目管理 Hook
   const {
@@ -168,10 +147,6 @@ const AppContent: React.FC = () => {
     void reloadSettings();
   }, [reloadSettings]);
 
-  const openKomaApi = useCallback(() => {
-    void electronService.shell.openExternal('https://komaapi.com');
-  }, []);
-
   // 当前项目 ITV 渠道的时长规格 — 传给 ProjectSettingsModal 让"视频提示词"档位 checkbox
   // 把不在 spec 范围内的档位灰显（model 优先 > providerType > default）
   const projectItvDurationSpec = useMemo(() => {
@@ -183,46 +158,6 @@ const AppContent: React.FC = () => {
       ?? getDurationSpecForProviderType(ctx?.channelConfig.providerType)
     );
   }, [activeProject, appSettings]);
-
-  const handleActivateFromLockedView = useCallback(async () => {
-    const apiKey = activationInputKey.trim();
-    if (!apiKey) {
-      message.warning(t('activation.emptyKey'));
-      return;
-    }
-
-    setActivationVerifying(true);
-    try {
-      const verifyResult = await activationService.verifyApiKey(apiKey);
-      if (!verifyResult.success) {
-        message.error(verifyResult.error === 'invalid_key'
-          ? t('activation.invalidKey')
-          : t('activation.verifyFailed'));
-        return;
-      }
-
-      const channelResult = await activationService.ensureDefaultModelChannels(apiKey);
-      if (!channelResult.success || !channelResult.channelIds) {
-        message.error(t('activation.defaultChannelsFailed'));
-        return;
-      }
-
-      const info: ActivationInfo = {
-        activatedAt: Date.now(),
-        lastValidatedAt: Date.now(),
-        maskedKey: activationService.maskApiKey(apiKey),
-        defaultChannelIds: channelResult.channelIds,
-      };
-
-      await activationService.saveActivationInfo(info);
-      setActivationInfo(info);
-      setActivationInputKey('');
-      await reloadSettings();
-      message.success(t('activation.verifySuccess'));
-    } finally {
-      setActivationVerifying(false);
-    }
-  }, [activationInputKey, message, reloadSettings, t]);
 
   // 注册 main → renderer 反向调用的 fulfillers：
   //   media:* 由 main 主导媒体轮询 → renderer 调原 provider + 落盘
@@ -251,7 +186,7 @@ const AppContent: React.FC = () => {
 
   // 启动/激活项目时检查未完成媒体任务，由用户决定是否恢复
   useEffect(() => {
-    if (!activeProject || activationLocked) return;
+    if (!activeProject) return;
 
     let disposed = false;
     const projectId = activeProject.id;
@@ -273,7 +208,7 @@ const AppContent: React.FC = () => {
     return () => {
       disposed = true;
     };
-  }, [activeProject?.id, activationLocked]);
+  }, [activeProject?.id]);
 
   // 从存储加载分析数据
   const loadAnalysisData = useCallback(async (projectId: string) => {
@@ -348,14 +283,6 @@ const AppContent: React.FC = () => {
       loadAnalysisData(activeProject.id);
     }
   }, [view, activeProject?.id, isVideoDevMode, loadAnalysisData]);
-
-  useEffect(() => {
-    // 锁定状态关闭所有残留弹窗/任务状态
-    if (activationLocked) {
-      setIsCreateModalOpen(false);
-      setIsProjectSettingsOpen(false);
-    }
-  }, [activationLocked]);
 
   // 切换到视频步骤时加载 shots
   useEffect(() => {
@@ -579,200 +506,141 @@ const AppContent: React.FC = () => {
   const pendingMediaTaskSummary = pendingMediaPrompt
     ? summarizePendingMediaTasks(pendingMediaPrompt.tasks)
     : '';
-  const ActivationLockedView = (
-    <div className="h-full flex items-center justify-center bg-bg-app p-6">
-      <div className="w-full max-w-sm rounded-3xl border border-border-subtle bg-bg-surface/50 p-6 shadow-2xl shadow-black/30">
-        <div className="mb-5 text-center">
-          <div className="text-lg font-semibold text-text-primary">激活 Koma Studio</div>
-          <Text className="mt-2 block text-sm leading-6 text-text-secondary">
-            请输入你的 KomaAPI 激活码。还没有激活码？可以前往官网获取后再回来激活。
-          </Text>
-        </div>
-        <Input.Password
-          autoFocus
-          size="large"
-          placeholder={t('activation.apiKeyPlaceholder')}
-          value={activationInputKey}
-          onChange={event => setActivationInputKey(event.target.value)}
-          onPressEnter={handleActivateFromLockedView}
-          prefix={<KeyOutlined className="text-text-tertiary" />}
-          className="bg-bg-app border-border text-text-primary"
-        />
-        <Button
-          type="primary"
-          size="large"
-          block
-          loading={activationVerifying}
-          onClick={handleActivateFromLockedView}
-          className="mt-3 bg-accent-hover hover:bg-accent border-none"
-        >
-          {activationVerifying ? t('activation.activating') : t('activation.activate')}
-        </Button>
-        <Button
-          type="link"
-          block
-          onClick={openKomaApi}
-          className="mt-2 text-text-secondary hover:text-accent"
-        >
-          前往官网获取激活码
-        </Button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="flex flex-col h-screen bg-bg-app text-text-primary font-sans selection:bg-accent/30">
       <WindowControls />
       <div className="flex flex-1 min-h-0">
-        {!activationLocked && (
-          <Sidebar
-            view={view}
-            activeProject={activeProject}
-            activeEpisode={activeEpisode}
-            onViewChange={setView}
-            onConfigChange={reloadSettings}
-            activationInfo={activationInfo}
-            activationLocked={activationLocked}
-            onActivationChange={setActivationInfo}
-          />
-        )}
+        <Sidebar
+          view={view}
+          activeProject={activeProject}
+          activeEpisode={activeEpisode}
+          onViewChange={setView}
+          onConfigChange={reloadSettings}
+        />
         <div className="flex-1 flex flex-col min-w-0 transition-all duration-300">
           <main className="flex-1 overflow-hidden relative bg-bg-app">
-            {activationLoading ? (
-              <div className="flex h-full items-center justify-center">
-                <Spin size="large" description="检查激活状态..."><div className="p-12" /></Spin>
-              </div>
-            ) : activationLocked ? (
-              ActivationLockedView
-            ) : (
-              <>
-                {view === 'projects' && (
-                  projectsLoading ? (
-                    <div className="flex h-full items-center justify-center">
-                      <Spin size="large" description="加载项目列表..."><div className="p-12" /></Spin>
-                    </div>
-                  ) : (
-                    <ProjectList
-                      projects={displayProjects}
-                      onSelectProject={handleSelectProject}
-                      onCreateProject={() => setIsCreateModalOpen(true)}
-                      onDeleteProject={handleDeleteProject}
-                    />
-                  )
-                )}
-                {view === 'settings' && (
-                  <Suspense fallback={<ViewLoading tip="加载设置页面..." />}>
-                    <SettingsPage settings={appSettings} onSave={setAppSettings} />
-                  </Suspense>
-                )}
-                {view === 'plugins' && (
-                  <Suspense fallback={<ViewLoading tip="加载插件管理..." />}>
-                    <PluginManager />
-                  </Suspense>
-                )}
-                {view === 'chat' && (
-                  <Suspense fallback={<ViewLoading tip="加载对话页面..." />}>
-                    <ChatPage />
-                  </Suspense>
-                )}
-                {view.startsWith('plugin:') && (
-                  <Suspense fallback={<ViewLoading tip="加载插件..." />}>
-                    <PluginHost pluginId={view.replace('plugin:', '')} />
-                  </Suspense>
-                )}
-                {view === 'editor' && activeProject && (
-                  <Suspense fallback={<ViewLoading tip="加载中..." />}>
-                    <EditorView
-                      activeProject={activeProject}
-                      activeEpisode={activeEpisode}
-                      editorStep={editorStep}
-                      stepProgress={stepProgress}
-                      scriptText={scriptText}
-                      analysisData={analysisData}
-                      appSettings={appSettings}
-                      mentionItems={mentionItems}
-                      onStepChange={setEditorStep}
-                      onStepChangeWithMark={handleStepChangeWithMark}
-                      onViewChange={setView}
-                      onOpenProjectSettings={() => setIsProjectSettingsOpen(true)}
-                      onScriptChange={setScriptText}
-                      onProjectUpdate={(updates) => setActiveProject(prev => prev ? { ...prev, ...updates } : prev)}
-                      onActiveEpisodeChange={setActiveEpisode}
-                    />
-                  </Suspense>
-                )}
-              </>
+            {view === 'projects' && (
+              projectsLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <Spin size="large" description="加载项目列表..."><div className="p-12" /></Spin>
+                </div>
+              ) : (
+                <ProjectList
+                  projects={displayProjects}
+                  onSelectProject={handleSelectProject}
+                  onCreateProject={() => setIsCreateModalOpen(true)}
+                  onDeleteProject={handleDeleteProject}
+                />
+              )
+            )}
+            {view === 'settings' && (
+              <Suspense fallback={<ViewLoading tip="加载设置页面..." />}>
+                <SettingsPage settings={appSettings} onSave={setAppSettings} />
+              </Suspense>
+            )}
+            {view === 'plugins' && (
+              <Suspense fallback={<ViewLoading tip="加载插件管理..." />}>
+                <PluginManager />
+              </Suspense>
+            )}
+            {view === 'chat' && (
+              <Suspense fallback={<ViewLoading tip="加载对话页面..." />}>
+                <ChatPage />
+              </Suspense>
+            )}
+            {view.startsWith('plugin:') && (
+              <Suspense fallback={<ViewLoading tip="加载插件..." />}>
+                <PluginHost pluginId={view.replace('plugin:', '')} />
+              </Suspense>
+            )}
+            {view === 'editor' && activeProject && (
+              <Suspense fallback={<ViewLoading tip="加载中..." />}>
+                <EditorView
+                  activeProject={activeProject}
+                  activeEpisode={activeEpisode}
+                  editorStep={editorStep}
+                  stepProgress={stepProgress}
+                  scriptText={scriptText}
+                  analysisData={analysisData}
+                  appSettings={appSettings}
+                  mentionItems={mentionItems}
+                  onStepChange={setEditorStep}
+                  onStepChangeWithMark={handleStepChangeWithMark}
+                  onViewChange={setView}
+                  onOpenProjectSettings={() => setIsProjectSettingsOpen(true)}
+                  onScriptChange={setScriptText}
+                  onProjectUpdate={(updates) => setActiveProject(prev => prev ? { ...prev, ...updates } : prev)}
+                  onActiveEpisodeChange={setActiveEpisode}
+                />
+              </Suspense>
             )}
           </main>
         </div>
       </div>
-      {!activationLocked && (
-        <>
-          <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onCreate={handleCreateProject} />
-          <ProjectSettingsModal
-            project={activeProject}
-            open={isProjectSettingsOpen}
-            onClose={() => setIsProjectSettingsOpen(false)}
-            onSave={handleProjectSettingsSave}
-            onGoToGlobalSettings={() => { setIsProjectSettingsOpen(false); setView('settings'); }}
-            itvDurationSpec={projectItvDurationSpec}
-          />
-          {pendingMediaPrompt && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="fixed bottom-28 right-4 z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-status-warning/30 bg-bg-surface/95 p-4 text-sm shadow-2xl backdrop-blur"
-            >
-              <div className="flex items-start gap-3">
-                <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-status-warning shadow-[0_0_12px_color-mix(in_srgb,var(--token-status-warning)_55%,transparent)]" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-text-primary">发现未完成任务</div>
-                  <div className="mt-1.5 leading-5 text-text-secondary">
-                    上次还有 {pendingMediaPrompt.tasks.length} 个媒体任务未完成。
-                  </div>
-                  {pendingMediaTaskSummary && (
-                    <div className="mt-1 text-xs leading-5 text-text-tertiary">
-                      {pendingMediaTaskSummary}
-                    </div>
-                  )}
-                  <div className="mt-2 text-xs leading-5 text-status-warning/80">
-                    删除本地记录不会取消远端生成。
-                  </div>
-                  <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    <Button
-                      size="small"
-                      danger
-                      loading={pendingMediaAction === 'delete'}
-                      disabled={Boolean(pendingMediaAction) && pendingMediaAction !== 'delete'}
-                      onClick={handleDeletePendingMediaTasks}
-                    >
-                      删除本地记录
-                    </Button>
-                    <Button
-                      size="small"
-                      loading={pendingMediaAction === 'fail'}
-                      disabled={Boolean(pendingMediaAction) && pendingMediaAction !== 'fail'}
-                      onClick={handleFailPendingMediaTasks}
-                    >
-                      标记失败
-                    </Button>
-                    <Button
-                      size="small"
-                      type="primary"
-                      disabled={Boolean(pendingMediaAction) && pendingMediaAction !== 'recover'}
-                      onClick={handleRecoverPendingMediaTasks}
-                    >
-                      继续恢复
-                    </Button>
-                  </div>
+      <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onCreate={handleCreateProject} />
+      <ProjectSettingsModal
+        project={activeProject}
+        open={isProjectSettingsOpen}
+        onClose={() => setIsProjectSettingsOpen(false)}
+        onSave={handleProjectSettingsSave}
+        onGoToGlobalSettings={() => { setIsProjectSettingsOpen(false); setView('settings'); }}
+        itvDurationSpec={projectItvDurationSpec}
+      />
+      {pendingMediaPrompt && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-28 right-4 z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-status-warning/30 bg-bg-surface/95 p-4 text-sm shadow-2xl backdrop-blur"
+        >
+          <div className="flex items-start gap-3">
+            <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-status-warning shadow-[0_0_12px_color-mix(in_srgb,var(--token-status-warning)_55%,transparent)]" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-text-primary">发现未完成任务</div>
+              <div className="mt-1.5 leading-5 text-text-secondary">
+                上次还有 {pendingMediaPrompt.tasks.length} 个媒体任务未完成。
+              </div>
+              {pendingMediaTaskSummary && (
+                <div className="mt-1 text-xs leading-5 text-text-tertiary">
+                  {pendingMediaTaskSummary}
                 </div>
+              )}
+              <div className="mt-2 text-xs leading-5 text-status-warning/80">
+                删除本地记录不会取消远端生成。
+              </div>
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button
+                  size="small"
+                  danger
+                  loading={pendingMediaAction === 'delete'}
+                  disabled={Boolean(pendingMediaAction) && pendingMediaAction !== 'delete'}
+                  onClick={handleDeletePendingMediaTasks}
+                >
+                  删除本地记录
+                </Button>
+                <Button
+                  size="small"
+                  loading={pendingMediaAction === 'fail'}
+                  disabled={Boolean(pendingMediaAction) && pendingMediaAction !== 'fail'}
+                  onClick={handleFailPendingMediaTasks}
+                >
+                  标记失败
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={Boolean(pendingMediaAction) && pendingMediaAction !== 'recover'}
+                  onClick={handleRecoverPendingMediaTasks}
+                >
+                  继续恢复
+                </Button>
               </div>
             </div>
-          )}
-        </>
+          </div>
+        </div>
       )}
       {/* 全局任务状态悬浮通知 */}
-      {!activationLocked && activeProject && (
+      {activeProject && (
         <TaskStatusBar key={`${activeProject.id}:${taskStatusRefreshKey}`} projectId={activeProject.id} />
       )}
     </div>
