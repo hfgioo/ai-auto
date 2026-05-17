@@ -3,9 +3,10 @@
  * 重构版：注册到 ProviderRegistry
  *
  * 当前内置渠道：
- *   - grok2api-imagine-itv  → Grok 图生视频（chat/completions）
- *   - koma-suihe-itv        → 即梦 Seedance 协议（multipart 占位符）
- *   - openai-video          → OpenAI 兼容视频（/v1/videos）
+ *   - grok2api-imagine-itv     → Grok 图生视频（JSON / image_reference[]）
+ *   - chenyme-grok2api-itv     → chenyme/grok2api 分支（multipart / input_reference[]）
+ *   - koma-suihe-itv           → 即梦 Seedance 协议（multipart 占位符）
+ *   - openai-video             → OpenAI 兼容视频（/v1/videos）
  *
  * 之前注册过的 runway / kling / pika / sora2 / seedance / vidu /
  * comfyui-animatediff / custom 已下线；用户旧渠道仍存于 SQLite，
@@ -15,12 +16,14 @@ export * from './types';
 export { Grok2ApiImagineITVProvider } from './Grok2ApiImagineITVProvider';
 export { SuiheITVProvider } from './SuiheITVProvider';
 export { OpenAIVideoITVProvider } from './OpenAIVideoITVProvider';
+export { ChenymeGrokVideoITVProvider } from './ChenymeGrokVideoITVProvider';
 
 import type { ITVConfig } from '../../types';
 import type { ITVProvider } from './types';
 import { Grok2ApiImagineITVProvider } from './Grok2ApiImagineITVProvider';
 import { SuiheITVProvider } from './SuiheITVProvider';
 import { OpenAIVideoITVProvider } from './OpenAIVideoITVProvider';
+import { ChenymeGrokVideoITVProvider } from './ChenymeGrokVideoITVProvider';
 import type { ProviderDefinition } from '../registry.types';
 import { DEFAULT_POLLING_CONFIG, MEDIA_PROVIDER_CONTRACT_VERSION } from '../registry.types';
 import { itvRegistry } from '../registry';
@@ -39,6 +42,24 @@ function registerBuiltinProviders() {
       capabilities: ['itv'],
       polling: DEFAULT_POLLING_CONFIG,
       auth: { apiKey: 'required', baseUrl: 'required' },
+    },
+    {
+      type: 'chenyme-grok2api-itv',
+      kind: 'itv',
+      name: 'Grok2API (chenyme)',
+      description: '适配 chenyme/grok2api 分支：POST /v1/videos 走 multipart/form-data，'
+        + '字段 model / prompt / seconds / size / resolution_name / preset / input_reference[]。'
+        + 'seconds ∈ {6,10,12,16,20}，resolution_name ∈ {480p,720p}，preset ∈ {fun,normal,spicy,custom}。',
+      factory: (config) => new ChenymeGrokVideoITVProvider(config as ITVConfig),
+      contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
+      capabilities: ['itv'],
+      polling: {
+        interval: 5000,
+        maxDuration: 600000,
+        initialDelay: 3000,
+      },
+      auth: { apiKey: 'required', baseUrl: 'required' },
+      fallbackPolicy: 'lock-to-selection',
     },
     {
       type: 'koma-suihe-itv',
