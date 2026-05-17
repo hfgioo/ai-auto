@@ -25,10 +25,10 @@
  * （如把 "9:16" 映射为 720x1280，把 "high" / "高清" 映射为 720p），其余值原样透传。
  *
  * 兼容性说明：
- *   chenyme/grok2api 实际接受 input_reference[] 同时支持文本 URL 与上传文件两种形态。
- *   本 provider 与项目其它 provider 行为一致，要求资源已经被 ensureRemoteUrlForMultipleSources
- *   归一为远程 URL（assetTransports = ['remote-url']），把每个 URL 作为 multipart 字符串字段
- *   `input_reference[]` 提交。
+ *   chenyme/grok2api 的 input_reference[] 是 FastAPI UploadFile，**不接受字符串 URL**，
+ *   必须 multipart 文件字段提交。本 provider 与项目其它 provider 行为一致，要求资源已经被
+ *   ensureRemoteUrlForMultipleSources 归一为远程 URL（assetTransports = ['remote-url']），
+ *   这里在发送前把每个 URL 用 safeFetch 拉成 Blob 再 append 为 File 字段；data-url 同样支持。
  */
 
 import type {
@@ -164,6 +164,54 @@ function normalizePreset(input: unknown, fallback: string): string {
   return PRESET_WHITELIST.has(raw) ? raw : fallback;
 }
 
+/** 从 URL 推断扩展名/MIME；推断不出时退回 png。 */
+function guessImageMime(url: string): { ext: string; mime: string } {
+  const cleaned = url.split('?')[0].split('#')[0];
+  const dot = cleaned.lastIndexOf('.');
+  const ext = dot >= 0 ? cleaned.slice(dot + 1).toLowerCase() : '';
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    bmp: 'image/bmp',
+  };
+  if (ext && map[ext]) return { ext, mime: map[ext] };
+  return { ext: 'png', mime: 'image/png' };
+}
+
+/**
+ * 从 data: 协议或 http(s) 远程 URL 取回字节并包成 File。
+ * 用于 chenyme/grok2api 的 input_reference[]：FastAPI 端要求 UploadFile，不接受字符串 URL。
+ */
+async function fetchAsFile(url: string, fallbackName: string): Promise<File> {
+  if (url.startsWith('data:')) {
+    const match = url.match(/^data:([^;,]+)(;base64)?,(.+)$/);
+    if (!match) throw new Error(`无法解析 data URL: ${url.slice(0, 60)}…`);
+    const mime = match[1] || 'application/octet-stream';
+    const isBase64 = !!match[2];
+    const payload = match[3];
+    let bytes: Uint8Array;
+    if (isBase64) {
+      const bin = atob(payload);
+      bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(payload));
+    }
+    return new File([bytes], fallbackName, { type: mime });
+  }
+  const resp = await safeFetch(url, { method: 'GET' });
+  if (!resp.ok) {
+    throw new Error(`下载参考图失败 (${resp.status}): ${url}`);
+  }
+  const buffer = await resp.arrayBuffer();
+  const headerType = resp.headers.get('content-type') || '';
+  const { mime } = guessImageMime(url);
+  return new File([buffer], fallbackName, { type: headerType || mime });
+}
+
 export class ChenymeGrokVideoITVProvider implements ITVProvider {
   type = 'chenyme-grok2api-itv' as const;
   config: ITVConfig;
@@ -288,10 +336,20 @@ export class ChenymeGrokVideoITVProvider implements ITVProvider {
     formData.append('size', size);
     formData.append('resolution_name', resolutionName);
     formData.append('preset', preset);
-    for (const url of references) {
-      // chenyme/grok2api 接受 input_reference[] 同时支持 URL 文本与文件上传；
-      // 与项目其它 provider 行为一致，传 URL。
-      formData.append('input_reference[]', url);
+    // chenyme/grok2api 的 input_reference[] 是 FastAPI UploadFile，**不接受 URL 字符串**。
+    // 这里把每个远程 URL 拉取成字节，再以 File 形式 append；safeFetch 在 Electron 走主进程
+    // IPC 绕开 CORS，serializeFormDataForIpc 已支持 File/Blob 字段。
+    for (let i = 0; i < references.length; i += 1) {
+      const url = references[i];
+      const { ext } = guessImageMime(url);
+      const filename = `reference-${i + 1}.${ext}`;
+      try {
+        const file = await fetchAsFile(url, filename);
+        formData.append('input_reference[]', file, filename);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(`参考图 ${i + 1} 准备失败：${reason}`);
+      }
     }
 
     logger.info('Chenyme grok2api 视频任务创建', {
