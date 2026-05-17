@@ -27,6 +27,7 @@ import type {
   PhaseState,
   RunnerState,
 } from '../../workflow/autoPipelineRunner';
+import { rateLimiter, type RateCategory } from '../../utils/rateLimiter';
 
 const { Text } = Typography;
 
@@ -70,6 +71,7 @@ export const AutoPipelinePanel: React.FC<AutoPipelinePanelProps> = ({ runner, ph
   const [collapsed, setCollapsed] = useState(false);
   // 用于让 running phase 的耗时实时刷新
   const [, setTick] = useState(0);
+  const [rateStats, setRateStats] = useState(rateLimiter.getStats());
 
   useEffect(() => {
     const unsub = runner.subscribe(setState);
@@ -79,7 +81,10 @@ export const AutoPipelinePanel: React.FC<AutoPipelinePanelProps> = ({ runner, ph
   // 跑步秒表：每秒刷新一次
   useEffect(() => {
     if (state.status !== 'running' && state.status !== 'paused') return;
-    const id = setInterval(() => setTick(t => t + 1), 1000);
+    const id = setInterval(() => {
+      setTick(t => t + 1);
+      setRateStats(rateLimiter.getStats());
+    }, 1000);
     return () => clearInterval(id);
   }, [state.status]);
 
@@ -169,6 +174,37 @@ export const AutoPipelinePanel: React.FC<AutoPipelinePanelProps> = ({ runner, ph
       {/* 展开态：完整列表 */}
       {!collapsed && (
         <>
+          {/* 调用速率仪表 */}
+          {(state.status === 'running' || state.status === 'paused' || state.status === 'awaiting') && (
+            <div style={{
+              padding: '6px 12px',
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              fontSize: 11,
+              display: 'flex',
+              gap: 12,
+              flexWrap: 'wrap',
+              color: '#aaa',
+            }}>
+              {(['llm', 'tti', 'itv', 'tts'] as RateCategory[]).map(cat => {
+                const stat = rateStats[cat];
+                if (!stat) return null;
+                const utilization = stat.rpm > 0 ? Math.min(100, Math.round((stat.recent60s / stat.rpm) * 100)) : 0;
+                const pendingChip = stat.queueLength > 0
+                  ? <span style={{ color: '#faad14' }}>队列 {stat.queueLength}</span>
+                  : null;
+                return (
+                  <div key={cat} style={{ display: 'flex', gap: 4, alignItems: 'baseline' }}>
+                    <span style={{ textTransform: 'uppercase', opacity: 0.7 }}>{cat}</span>
+                    <span style={{ color: utilization > 80 ? '#ff7875' : 'inherit' }}>
+                      {stat.recent60s}/{stat.rpm > 0 ? stat.rpm : '∞'}
+                    </span>
+                    {pendingChip}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div style={{ padding: '8px 12px', maxHeight: 360, overflowY: 'auto' }}>
             {state.phases.map((phaseState, idx) => {
               const def = phaseById.get(phaseState.id);

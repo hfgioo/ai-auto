@@ -19,6 +19,7 @@ import { AutoPipelineSetupModal } from '../storyboard/AutoPipelineSetupModal';
 import { AutoPipelinePanel } from '../storyboard/AutoPipelinePanel';
 import { AutoPipelineRunner } from '../../workflow/autoPipelineRunner';
 import { buildPipelinePhases, type AutoPipelineContext } from '../../workflow/autoPipelinePhases';
+import { rateLimiter } from '../../utils/rateLimiter';
 // 副作用 import：把各步骤 Component 注入到 registry
 import './steps';
 
@@ -161,7 +162,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   };
 
   // 一键自动到剪辑：先构造 phases，让 SetupModal 知道选项；启动后挂上 runner
-  const buildAutoPipeline = (): {
+  const buildAutoPipeline = (lowLoadMode = false): {
     phases: ReturnType<typeof buildPipelinePhases>;
     pipelineCtx: AutoPipelineContext;
   } | null => {
@@ -186,6 +187,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
       projectStylePrompt: activeProject.stylePrompt,
       aspectRatio: activeProject.aspectRatio,
       onJumpToVideoStep: () => onStepChange('video'),
+      lowLoadMode,
     };
     return { phases: buildPipelinePhases(pipelineCtx), pipelineCtx };
   };
@@ -194,10 +196,17 @@ export const EditorView: React.FC<EditorViewProps> = ({
     setAutoSetupOpen(true);
   };
 
-  const handleStartAutoPipeline = (enabledIds: Set<string>) => {
-    const built = buildAutoPipeline();
+  const handleStartAutoPipeline = (enabledIds: Set<string>, options: { lowLoadMode: boolean }) => {
+    const built = buildAutoPipeline(options.lowLoadMode);
     if (!built) return;
     setAutoSetupOpen(false);
+    // 低负载模式：所有上游 RPM 减半（最少 1）
+    if (options.lowLoadMode) {
+      rateLimiter.setRpm('llm', Math.max(1, Math.floor(rateLimiter.getRpm('llm') / 2)));
+      rateLimiter.setRpm('tti', Math.max(1, Math.floor(rateLimiter.getRpm('tti') / 2)));
+      rateLimiter.setRpm('itv', Math.max(1, Math.floor(rateLimiter.getRpm('itv') / 2)));
+      rateLimiter.setRpm('tts', Math.max(1, Math.floor(rateLimiter.getRpm('tts') / 2)));
+    }
     const runner = new AutoPipelineRunner({
       phases: built.phases,
       enabledPhaseIds: enabledIds,

@@ -5,11 +5,11 @@
  * - 按 group 分组渲染
  * - 用户勾选/取消时通过 expandEnabledWithDependencies / reconcileEnabledPhases 自动级联
  * - [全选] [全不选] 提供快捷
- * - 启动时把最终勾选集合（Set<string>）传给上层
+ * - 启动时把最终勾选集合（Set<string>）+ 是否低负载模式传给上层
  */
 import React, { useMemo, useState } from 'react';
-import { Modal, Checkbox, Button, Space, Typography, Divider } from 'antd';
-import { RocketOutlined } from '@ant-design/icons';
+import { Modal, Checkbox, Button, Space, Typography, Divider, Switch, Tooltip } from 'antd';
+import { RocketOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import {
   expandEnabledWithDependencies,
   reconcileEnabledPhases,
@@ -33,7 +33,7 @@ interface AutoPipelineSetupModalProps {
   open: boolean;
   phases: PhaseDefinition[];
   onCancel: () => void;
-  onStart: (enabledIds: Set<string>) => void;
+  onStart: (enabledIds: Set<string>, options: { lowLoadMode: boolean }) => void;
 }
 
 export const AutoPipelineSetupModal: React.FC<AutoPipelineSetupModalProps> = ({
@@ -53,6 +53,7 @@ export const AutoPipelineSetupModal: React.FC<AutoPipelineSetupModalProps> = ({
   }, [phases]);
 
   const [enabled, setEnabled] = useState<Set<string>>(initialEnabled);
+  const [lowLoadMode, setLowLoadMode] = useState<boolean>(false);
 
   const toggle = (phaseId: string) => {
     setEnabled(prev => {
@@ -102,7 +103,7 @@ export const AutoPipelineSetupModal: React.FC<AutoPipelineSetupModalProps> = ({
           type="primary"
           icon={<RocketOutlined />}
           disabled={enabled.size === 0}
-          onClick={() => onStart(enabled)}
+          onClick={() => onStart(enabled, { lowLoadMode })}
         >
           启动（{enabled.size} / {phases.length}）
         </Button>,
@@ -116,6 +117,29 @@ export const AutoPipelineSetupModal: React.FC<AutoPipelineSetupModalProps> = ({
       </Text>
 
       <Divider style={{ margin: '12px 0' }} />
+
+      {/* 低负载模式开关 */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '8px 12px',
+        marginBottom: 12,
+        background: 'rgba(250, 173, 20, 0.06)',
+        border: '1px solid rgba(250, 173, 20, 0.2)',
+        borderRadius: 6,
+      }}>
+        <ThunderboltOutlined style={{ color: '#faad14', fontSize: 16 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>低负载模式</div>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            参考图并发降为 1，所有上游 RPM 减半。跑得慢但 UI 不卡，散热好。
+          </Text>
+        </div>
+        <Tooltip title={lowLoadMode ? '关闭后恢复满速' : '打开后跑得慢但更稳'}>
+          <Switch checked={lowLoadMode} onChange={setLowLoadMode} />
+        </Tooltip>
+      </div>
 
       {GROUP_ORDER.map(group => {
         const list = phasesByGroup.get(group);
