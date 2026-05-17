@@ -2,11 +2,11 @@
  * TTI Provider 工厂和导出
  * 重构版：注册到 ProviderRegistry
  *
- * 当前内置渠道收敛为 3 个，统一以 https://komaapi.com 作为默认 baseUrl，
- * 三者都默认启用 Koma 协议（内部仍用 'grok-image-index' 作为编译标识）：
+ * 当前内置渠道收敛为 3 个，三者都默认启用 Koma 协议（内部仍用
+ * 'grok-image-index' 作为编译标识）。baseUrl 不预填，由用户自行配置：
  *   - openai-compatible-tti  → OpenAI 标准协议
- *   - grok2api-imagine-tti   → Koma官方Grok（多参考 chat/completions）
- *   - gemini-native-tti      → Koma官方Nano banana（Gemini 原生 generateContent）
+ *   - grok2api-imagine-tti   → Grok 多参考 chat/completions
+ *   - gemini-native-tti      → Gemini 原生 generateContent（多图参考）
  *
  * 之前注册过的 nano-banana / comfyui / gemini-3-pro 已下线；用户旧渠道
  * 仍存于 SQLite 但不会再被工厂创建（createTTIProvider 会抛"未知服务商"）。
@@ -37,31 +37,28 @@ function registerBuiltinProviders() {
       contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
       capabilities: ['tti'],
       polling: DEFAULT_POLLING_CONFIG,
-      presetBaseUrl: 'https://komaapi.com',
-      auth: { apiKey: 'required', baseUrl: 'optional' },
+      auth: { apiKey: 'required', baseUrl: 'required' },
     },
     {
       type: 'grok2api-imagine-tti',
       kind: 'tti',
-      name: 'Koma官方Grok',
-      description: 'Koma 官方 Grok 文生图（多参考 chat/completions）',
+      name: 'Grok 多参考',
+      description: 'Grok 多参考文生图（chat/completions 协议）',
       factory: (config) => new Grok2ApiImagineTTIProvider(config as TTIModelConfig),
       contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
       capabilities: ['tti'],
       polling: DEFAULT_POLLING_CONFIG,
-      presetBaseUrl: 'https://komaapi.com',
-      auth: { apiKey: 'required', baseUrl: 'optional' },
+      auth: { apiKey: 'required', baseUrl: 'required' },
     },
     {
       type: 'gemini-native-tti',
       kind: 'tti',
-      name: 'Koma官方Nano banana',
-      description: 'Koma 官方 Nano banana 文生图（Gemini 原生 generateContent，支持多图参考）',
+      name: 'Gemini 原生',
+      description: 'Gemini 原生 generateContent 文生图（支持多图参考）',
       factory: (config) => new GeminiNativeTTIProvider(config as TTIModelConfig),
       contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
       capabilities: ['tti'],
-      presetBaseUrl: 'https://komaapi.com',
-      auth: { apiKey: 'required', baseUrl: 'optional' },
+      auth: { apiKey: 'required', baseUrl: 'required' },
     },
   ];
 

@@ -21,7 +21,8 @@
  *
  * 当前阶段Koma 即梦上游强制锁 480p，所以 size 始终送 480p 档位（按 aspectRatio 选 854x480 / 480x854）。
  *
- * 注意：本 provider 走 komaapi.com 网关，独立类型避免与 grok2api 混用字段格式。
+ * 注意：本 provider 使用即梦专用 multipart 协议，独立类型避免与 grok2api 混用字段格式；
+ *       baseUrl 由用户在渠道配置中提供。
  */
 
 import type {
@@ -150,7 +151,11 @@ export class SuiheITVProvider implements ITVProvider {
   }
 
   private getBaseUrl(): string {
-    return this.config.baseUrl || 'https://komaapi.com';
+    const url = String(this.config.baseUrl || '').trim();
+    if (!url) {
+      throw new Error('SuiheITVProvider 缺少 baseUrl，请在渠道配置中填写');
+    }
+    return url;
   }
 
   private getHeaders(): Record<string, string> {

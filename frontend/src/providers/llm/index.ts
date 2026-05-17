@@ -20,17 +20,15 @@ export { IPCLLMProvider } from './IPCLLMProvider';
 interface LLMChannelDef {
   type: string;                                                  // 渠道 ID（'openai' / 'gemini' / ...）
   name: string;                                                  // UI 显示名
-  presetBaseUrl: string;                                         // 默认 baseUrl
+  presetBaseUrl?: string;                                        // 默认 baseUrl，可选
   runtimeProtocol: 'openai-compatible' | 'gemini' | 'claude';   // 主进程路由协议
 }
 
-// 内置 LLM 渠道收敛为三个标准协议，全部默认走 https://komaapi.com 网关。
-// 之前注册过的 deepseek / qwen / zhipu / moonshot 已下线；用户旧渠道仍存于
-// SQLite，但 IPCLLMProvider 主进程侧仍按 runtimeProtocol 决定调用通路。
+// 内置 LLM 渠道注册三个标准协议；不预填 baseUrl，由用户在添加渠道时自行填写。
 const BUILTIN_LLM_CHANNELS: LLMChannelDef[] = [
-  { type: 'openai', name: 'OpenAI',  presetBaseUrl: 'https://komaapi.com', runtimeProtocol: 'openai-compatible' },
-  { type: 'claude', name: 'Claude',  presetBaseUrl: 'https://komaapi.com', runtimeProtocol: 'claude' },
-  { type: 'gemini', name: 'Gemini',  presetBaseUrl: 'https://komaapi.com', runtimeProtocol: 'gemini' },
+  { type: 'openai', name: 'OpenAI',  runtimeProtocol: 'openai-compatible' },
+  { type: 'claude', name: 'Claude',  runtimeProtocol: 'claude' },
+  { type: 'gemini', name: 'Gemini',  runtimeProtocol: 'gemini' },
 ];
 
 function registerBuiltinLLMProviders() {
@@ -42,7 +40,7 @@ function registerBuiltinLLMProviders() {
       name: ch.name,
       runtimeProviderType: ch.runtimeProtocol,
       capabilities: ['llm'],
-      presetBaseUrl: ch.presetBaseUrl,
+      ...(ch.presetBaseUrl ? { presetBaseUrl: ch.presetBaseUrl } : {}),
       auth: { apiKey: 'required', baseUrl: 'optional' },
       // factory 在此处不会被工厂分发使用（LLM 始终走 createLLMProvider → IPC），
       // 仅为接口完整性提供一个直通实现。

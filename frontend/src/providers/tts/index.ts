@@ -72,7 +72,7 @@ const komaTTSSchema = {
   type: 'object',
   properties: {
     apiKey: { title: 'API Key', type: 'string', format: 'password' },
-    baseUrl: { title: 'API URL', type: 'string', default: 'https://komaapi.com' },
+    baseUrl: { title: 'API URL', type: 'string' },
     model: { title: '模型', type: 'string', default: 'qwen-tts' },
     defaultVoice: {
       title: '默认音色',
@@ -81,7 +81,7 @@ const komaTTSSchema = {
       default: KOMA_TTS_VOICES[0]?.id ?? 'cherry',
     },
   },
-  required: ['apiKey'],
+  required: ['apiKey', 'baseUrl'],
 };
 
 // 注册内置 TTS Provider
@@ -137,14 +137,13 @@ function registerBuiltinTTSProviders() {
     {
       type: 'koma-tts',
       kind: 'tts',
-      name: 'Koma 官方 TTS',
-      description: 'Koma 官方语音合成（komaapi.com 网关 / OpenAI 兼容协议 / qwen-tts）',
+      name: 'Qwen TTS（OpenAI 兼容）',
+      description: 'OpenAI 兼容协议（/v1/audio/speech）下的 qwen-tts 语音合成',
       factory: (config) => new KomaTTSProvider(config as TTSConfig),
       contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
       capabilities: ['tts'],
       configSchema: komaTTSSchema,
-      presetBaseUrl: 'https://komaapi.com',
-      auth: { apiKey: 'required', baseUrl: 'optional' },
+      auth: { apiKey: 'required', baseUrl: 'required' },
     },
   ];
 

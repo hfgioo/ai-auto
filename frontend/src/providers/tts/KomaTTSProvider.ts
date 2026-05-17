@@ -1,15 +1,13 @@
 /**
- * Koma 官方 TTS Provider
- *
- * 走 komaapi.com 网关，OpenAI 兼容协议（/v1/audio/speech）。
- * 当前模型：`qwen-tts`（OpenAI SDK 兼容下的唯一模型，由网关侧决定上游）。
+ * OpenAI 兼容 /v1/audio/speech 协议的 TTS Provider（默认模型 qwen-tts）。
+ * baseUrl 由用户在渠道配置中填写，可指向任何兼容上游或自建网关。
  *
  * 接入示意：
- *   curl -X POST https://komaapi.com/v1/audio/speech \
- *     -H "Authorization: Bearer <激活 Key>" \
+ *   curl -X POST <baseUrl>/v1/audio/speech \
+ *     -H "Authorization: Bearer <API Key>" \
  *     -H "Content-Type: application/json" \
- *     -d '{"model":"qwen-tts","voice":"cherry","input":"通过 Koma 中转测试"}' \
- *     --output via-koma.wav
+ *     -d '{"model":"qwen-tts","voice":"cherry","input":"测试"}' \
+ *     --output out.wav
  *
  * 设计动机：与现有 OpenAITTSProvider 体系对齐，但内置默认音色清单（先放 cherry / 芊悦
  * 一个，后续再扩），避免 UI 上让用户面对一个空 voice 输入框。
@@ -27,7 +25,6 @@ export { KOMA_TTS_VOICES } from './komaTTSVoices';
 
 const logger = createLogger('KomaTTSProvider');
 
-const DEFAULT_BASE_URL = 'https://komaapi.com';
 const DEFAULT_MODEL = 'qwen-tts';
 const DEFAULT_VOICE_ID = KOMA_TTS_DEFAULT_VOICE_ID;
 
@@ -40,7 +37,11 @@ export class KomaTTSProvider implements TTSProvider {
   }
 
   private getBaseUrl(): string {
-    return (this.config.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+    const url = String(this.config.baseUrl || '').trim();
+    if (!url) {
+      throw new Error('KomaTTSProvider 缺少 baseUrl，请在渠道配置中填写');
+    }
+    return url.replace(/\/+$/, '');
   }
 
   private getModelName(): string {

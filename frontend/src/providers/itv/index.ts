@@ -2,13 +2,14 @@
  * ITV Provider 模块导出
  * 重构版：注册到 ProviderRegistry
  *
- * 当前内置渠道收敛为 2 个，都默认指向 https://komaapi.com：
- *   - grok2api-imagine-itv  → Koma官方 Grok（图生视频）
- *   - koma-suihe-itv        → Koma 官方 - 即梦（Koma 即梦 Seedance）
+ * 当前内置渠道：
+ *   - grok2api-imagine-itv  → Grok 图生视频（chat/completions）
+ *   - koma-suihe-itv        → 即梦 Seedance 协议（multipart 占位符）
+ *   - openai-video          → OpenAI 兼容视频（/v1/videos）
  *
  * 之前注册过的 runway / kling / pika / sora2 / seedance / vidu /
  * comfyui-animatediff / custom 已下线；用户旧渠道仍存于 SQLite，
- * 但 createITVProvider 不再认识这些 providerType。
+ * 但 createITVProvider 不再认识这些 providerType。baseUrl 由用户自配，无预填。
  */
 export * from './types';
 export { Grok2ApiImagineITVProvider } from './Grok2ApiImagineITVProvider';
@@ -31,22 +32,21 @@ function registerBuiltinProviders() {
     {
       type: 'grok2api-imagine-itv',
       kind: 'itv',
-      name: 'Koma官方 Grok',
-      description: 'Koma 官方 Grok 图生视频（chat/completions）',
+      name: 'Grok 图生视频',
+      description: 'Grok 图生视频（chat/completions）',
       factory: (config) => new Grok2ApiImagineITVProvider(config as ITVConfig),
       contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
       capabilities: ['itv'],
       polling: DEFAULT_POLLING_CONFIG,
-      presetBaseUrl: 'https://komaapi.com',
-      auth: { apiKey: 'required', baseUrl: 'optional' },
+      auth: { apiKey: 'required', baseUrl: 'required' },
     },
     {
       type: 'koma-suihe-itv',
       kind: 'itv',
-      name: 'Koma 即梦',
-      description: 'Koma 官方激活通道下的即梦视频生成（seedance-2.0 / seedance-2.0-fast）。'
-        + '客户端发 OpenAI 标准视频 API JSON + Koma 即梦协议占位符（@image_file_N / '
-        + '@video_file_N / @audio_file_N），由 komaapi.com 网关转成上游 multipart。',
+      name: '即梦 Seedance',
+      description: '即梦视频生成（seedance-2.0 / seedance-2.0-fast）。'
+        + '客户端发 OpenAI 标准视频 API JSON + 即梦协议占位符（@image_file_N / '
+        + '@video_file_N / @audio_file_N），由网关侧转成上游 multipart。',
       factory: (config) => new SuiheITVProvider(config as ITVConfig),
       contractVersion: MEDIA_PROVIDER_CONTRACT_VERSION,
       capabilities: ['itv'],
@@ -55,8 +55,7 @@ function registerBuiltinProviders() {
         maxDuration: 600000,
         initialDelay: 3000,
       },
-      presetBaseUrl: 'https://komaapi.com',
-      auth: { apiKey: 'required', baseUrl: 'optional' },
+      auth: { apiKey: 'required', baseUrl: 'required' },
     },
     {
       type: 'openai-video',
