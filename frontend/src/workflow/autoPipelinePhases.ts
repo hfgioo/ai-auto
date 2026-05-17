@@ -29,6 +29,7 @@ import { subscribeTaskTransitions } from '../store/tasksStore';
 import { generateCostumePhoto } from './characterAssetWorkflow';
 import { generateSceneImage, generatePropImage } from './scenePropAssetWorkflow';
 import { runWithConcurrency } from '../utils/concurrency';
+import { rateLimiter } from '../utils/rateLimiter';
 import type { PhaseDefinition } from './autoPipelineRunner';
 import type { TaskRecord } from '../services/tasksIPC';
 
@@ -55,6 +56,8 @@ export interface AutoPipelineContext {
   aspectRatio?: string;
   /** 跑完所有阶段后切换到剪辑步骤 */
   onJumpToVideoStep: () => void;
+  /** 低负载模式：concurrency 全部降为 1，rate limit 减半 */
+  lowLoadMode?: boolean;
 }
 
 /**
@@ -83,6 +86,7 @@ function waitForTaskTransition(
 
 /** 工厂：根据上下文构造 12 个 PhaseDefinition。 */
 export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[] {
+  const refImageConcurrency = ctx.lowLoadMode ? 1 : 2;
   return [
     // ============= 剧本预处理 =============
     {
@@ -92,6 +96,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
       defaultEnabled: false,
       run: async () => {
         if (!ctx.scriptText?.trim()) throw new Error('剧本为空，无法润色');
+        await rateLimiter.acquire('llm');
         const polished = await polishScript(
           ctx.appSettings,
           ctx.scriptText,
@@ -109,6 +114,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
       defaultEnabled: true,
       run: async () => {
         if (!ctx.scriptText?.trim()) throw new Error('剧本为空，无法推文化');
+        await rateLimiter.acquire('llm');
         const creationCtx = await createCreationContext(ctx.projectId, ctx.episodeId, {
           llmConfigId: ctx.llmSelection,
           styleSnapshot: ctx.styleSnapshot as any,
@@ -127,6 +133,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
       defaultEnabled: true,
       dependsOn: [],
       run: async () => {
+        await rateLimiter.acquire('llm');
         const { task } = await submitScriptAnalysisTask({
           projectId: ctx.projectId,
           episodeId: ctx.episodeId,
@@ -155,6 +162,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         const characterTasks = characters
           .filter(c => !c.media?.costumePhoto)
           .map(c => async () => {
+            await rateLimiter.acquire('tti');
             await generateCostumePhoto({
               projectId: ctx.projectId,
               character: c,
@@ -171,6 +179,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         const sceneTasks = scenes
           .filter(s => !s.media?.previewImage)
           .map(s => async () => {
+            await rateLimiter.acquire('tti');
             await generateSceneImage({
               projectId: ctx.projectId,
               scene: s,
@@ -187,6 +196,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         const propTasks = props
           .filter(p => !p.media?.previewImage)
           .map(p => async () => {
+            await rateLimiter.acquire('tti');
             await generatePropImage({
               projectId: ctx.projectId,
               prop: p,
@@ -201,7 +211,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
 
         const tasks = [...characterTasks, ...sceneTasks, ...propTasks];
         if (tasks.length === 0) return;
-        await runWithConcurrency(tasks, 2);
+        await runWithConcurrency(tasks, refImageConcurrency);
       },
     },
 
@@ -216,6 +226,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         const existing = await loadEpisodeShots(ctx.projectId, ctx.episodeId);
         if (existing.length > 0) return;  // 已有分镜则跳过
 
+        await rateLimiter.acquire('llm');
         const { task } = await submitShotAnalysisTask({
           projectId: ctx.projectId,
           episodeId: ctx.episodeId,
@@ -236,6 +247,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
       run: async () => {
         const shots = await loadEpisodeShots(ctx.projectId, ctx.episodeId);
         if (shots.length === 0) throw new Error('分镜数据为空');
+        await rateLimiter.acquire('llm');
         const creationCtx = await createCreationContext(ctx.projectId, ctx.episodeId, {
           llmConfigId: ctx.llmSelection,
           styleSnapshot: ctx.styleSnapshot as any,
@@ -256,6 +268,8 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         const shots = await loadEpisodeShots(ctx.projectId, ctx.episodeId);
         const targets = shots.filter(s => !s.imagePrompt?.trim());
         if (targets.length === 0) return;
+        // 每个分镜 1 个 LLM 请求；阶段开始前预申请 N 个 token 让 RPM 可控
+        for (let i = 0; i < targets.length; i += 1) await rateLimiter.acquire('llm');
         await batchGenerateShotPrompts(
           ctx.projectId,
           ctx.episodeId,
@@ -287,6 +301,8 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         });
         if (targets.length === 0) return;
         const shotIds = targets.map(s => s.id);
+        // 每个分镜 1 个 TTI 请求；预申请 N 个 token
+        for (let i = 0; i < targets.length; i += 1) await rateLimiter.acquire('tti');
         await batchGenerateShotImages(
           ctx.projectId,
           ctx.episodeId,
@@ -312,6 +328,7 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
         const shots = await loadEpisodeShots(ctx.projectId, ctx.episodeId);
         const targets = shots.filter(s => !s.videoPrompt?.trim());
         if (targets.length === 0) return;
+        for (let i = 0; i < targets.length; i += 1) await rateLimiter.acquire('llm');
         await batchGenerateShotPrompts(
           ctx.projectId,
           ctx.episodeId,
@@ -338,6 +355,8 @@ export function buildPipelinePhases(ctx: AutoPipelineContext): PhaseDefinition[]
           return videoCount === 0 && (s.videoPrompt?.trim()?.length ?? 0) > 0;
         });
         if (targets.length === 0) return;
+        // 视频 RPM 通常最严格；阶段开始前为每个分镜预申请 1 个 token
+        for (let i = 0; i < targets.length; i += 1) await rateLimiter.acquire('itv');
         await batchRenderShots(
           {
             projectId: ctx.projectId,

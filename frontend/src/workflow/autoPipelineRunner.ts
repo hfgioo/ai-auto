@@ -248,7 +248,23 @@ export class AutoPipelineRunner {
     const phases = this.state.phases.slice();
     phases[index] = { ...phases[index], ...patch };
     this.state = { ...this.state, phases };
-    this.emit();
+    // 仅 progressLabel 变化时节流，其他状态变化（status / startedAt / endedAt / error）立刻 emit
+    const onlyProgress = Object.keys(patch).length === 1 && 'progressLabel' in patch;
+    if (onlyProgress) {
+      this.scheduleEmit();
+    } else {
+      this.emit();
+    }
+  }
+
+  private scheduledEmit = false;
+  private scheduleEmit(): void {
+    if (this.scheduledEmit) return;
+    this.scheduledEmit = true;
+    setTimeout(() => {
+      this.scheduledEmit = false;
+      this.emit();
+    }, 250);
   }
 
   private emit(): void {
