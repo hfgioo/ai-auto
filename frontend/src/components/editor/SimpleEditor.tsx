@@ -13,6 +13,7 @@ import { SimplePropertiesPanel } from './SimplePropertiesPanel';
 import { SimpleAssetPanel } from './SimpleAssetPanel';
 import { SimpleExportDialog } from './SimpleExportDialog';
 import { useAssets } from './useAssets';
+import { useUndoRedo } from '../../hooks/useUndoRedo';
 import { addKeyframe, updateKeyframe, removeKeyframe, getKeyframeAtTime, getAnimatedProperties } from '../../engine/simpleKeyframe';
 import { findNextAvailablePosition } from '../../utils/trackCollision';
 import { saveEpisodeTimeline, loadEpisodeTimeline } from '../../store/projectStore';
@@ -46,6 +47,21 @@ interface SimpleEditorProps {
 }
 
 import { generateId } from '../../utils/generateId';
+
+/** 顶部工具栏按钮样式（撤销/重做/重新初始化） */
+function undoBtnStyle(enabled: boolean): React.CSSProperties {
+  return {
+    padding: '4px 10px',
+    fontSize: 12,
+    borderRadius: 4,
+    border: '1px solid var(--token-border-base, rgba(255,255,255,0.12))',
+    background: enabled ? 'var(--token-bg-surface, rgba(255,255,255,0.04))' : 'transparent',
+    color: enabled ? 'var(--token-text-primary, #ddd)' : 'var(--token-text-tertiary, #888)',
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    opacity: enabled ? 1 : 0.5,
+    transition: 'background 120ms ease, opacity 120ms ease',
+  };
+}
 
 // Shot 转换为 Tracks
 //
@@ -221,7 +237,9 @@ export function syncShotSelectionsIntoTracks(tracks: Track[], shots: Shot[]): Tr
 
 export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectId, episodeId, aspectRatio: projectAspectRatio }) => {
   const { message } = App.useApp();
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, tracksApi] = useUndoRedo<Track[]>([]);
+  const setTracks = tracksApi.set;     // 不入栈（用于初始化、拖动中）
+  const commitTracks = tracksApi.commit;  // 入栈（用于结束态、增删等离散操作）
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -236,17 +254,30 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
 
   const isDraggingRef = useRef(false);
 
+  /**
+   * 统一更新 tracks。
+   * - 拖动中：set（不入栈）
+   * - 拖动结束 / 离散操作：commit（入栈）
+   */
   const updateTracks = useCallback((updater: (prev: Track[]) => Track[]) => {
-    setTracks((prev) => {
-      const updated = updater(prev);
-      if (updated === prev) return prev;
-      return isDraggingRef.current ? updated : normalizeTimelineTracks(updated);
-    });
-  }, []);
+    if (isDraggingRef.current) {
+      setTracks((prev) => {
+        const updated = updater(prev);
+        if (updated === prev) return prev;
+        return updated;
+      });
+    } else {
+      commitTracks((prev) => {
+        const updated = updater(prev);
+        if (updated === prev) return prev;
+        return normalizeTimelineTracks(updated);
+      });
+    }
+  }, [setTracks, commitTracks]);
 
   const normalizeNow = useCallback(() => {
-    setTracks((prev) => normalizeTimelineTracks(prev));
-  }, []);
+    commitTracks((prev) => normalizeTimelineTracks(prev));
+  }, [commitTracks]);
 
   const handleDragStateChange = useCallback((isDragging: boolean) => {
     isDraggingRef.current = isDragging;
@@ -371,7 +402,7 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
       if (!projectId || !episodeId) {
         // 没有 projectId 或 episodeId，使用 shots 初始化
         if (shots.length > 0) {
-          setTracks(normalizeTimelineTracks(shotsToTracks(shots)));
+          tracksApi.reset(normalizeTimelineTracks(shotsToTracks(shots)));
         }
         setIsLoadingTimeline(false);
         return;
@@ -386,11 +417,11 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
         // 让"从分镜入剪辑→已选版本自动落轨"在重进时仍然生效。
         const savedHasClips = savedTracks.some((t) => Array.isArray(t.clips) && t.clips.length > 0);
         if (savedHasClips) {
-          setTracks(normalizeTimelineTracks(syncShotSelectionsIntoTracks(savedTracks, shots)));
+          tracksApi.reset(normalizeTimelineTracks(syncShotSelectionsIntoTracks(savedTracks, shots)));
           timelineCreatedAtRef.current = savedData!.createdAt || Date.now();
         } else if (shots.length > 0) {
           // 没保存过 OR 保存过但已被清空 → 从 shots 选中版本初始化（视频 / 音频 / 字幕全落轨）
-          setTracks(normalizeTimelineTracks(shotsToTracks(shots)));
+          tracksApi.reset(normalizeTimelineTracks(shotsToTracks(shots)));
           timelineCreatedAtRef.current = savedData?.createdAt || Date.now();
         }
       } catch (err) {
@@ -405,7 +436,7 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
           return;
         }
         if (shots.length > 0) {
-          setTracks(normalizeTimelineTracks(shotsToTracks(shots)));
+          tracksApi.reset(normalizeTimelineTracks(shotsToTracks(shots)));
         }
       } finally {
         setIsLoadingTimeline(false);
@@ -687,8 +718,92 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
     })));
   }, [updateTracks]);
 
+  /**
+   * 从分镜重新初始化轨道：丢弃当前所有剪辑，按 shots 当前选中版本重新生成 video/audio/text 三轨。
+   * 入栈以便用户误点了能撤销恢复。
+   */
+  const handleReinitFromShots = useCallback(() => {
+    if (shots.length === 0) {
+      message.warning('暂无分镜数据，无法重新初始化');
+      return;
+    }
+    const next = normalizeTimelineTracks(shotsToTracks(shots));
+    commitTracks(next);
+    message.success('已按分镜的当前选中版本重新生成时间线');
+  }, [shots, commitTracks, message]);
+
+  /** 键盘快捷键：Ctrl+Z 撤销，Ctrl+Shift+Z / Ctrl+Y 重做 */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // 输入框 / textarea / 可编辑元素内不抢快捷键，让原生 input undo 生效
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+      }
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+      const key = e.key.toLowerCase();
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        tracksApi.undo();
+      } else if ((key === 'z' && e.shiftKey) || key === 'y') {
+        e.preventDefault();
+        tracksApi.redo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [tracksApi]);
+
   return (
     <div className={styles.container}>
+      {/* 编辑器顶部工具栏：撤销 / 重做 / 重新初始化 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 12px',
+          borderBottom: '1px solid var(--token-border-subtle, rgba(255,255,255,0.08))',
+          background: 'var(--token-bg-elevated, rgba(255,255,255,0.02))',
+          flexShrink: 0,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => tracksApi.undo()}
+          disabled={!tracksApi.canUndo}
+          title="撤销 (Ctrl+Z)"
+          style={undoBtnStyle(tracksApi.canUndo)}
+          aria-label="撤销"
+        >
+          ↶ 撤销
+        </button>
+        <button
+          type="button"
+          onClick={() => tracksApi.redo()}
+          disabled={!tracksApi.canRedo}
+          title="重做 (Ctrl+Shift+Z)"
+          style={undoBtnStyle(tracksApi.canRedo)}
+          aria-label="重做"
+        >
+          ↷ 重做
+        </button>
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={handleReinitFromShots}
+          title="按当前分镜的视频/图像/配音重新初始化时间线（会清空当前剪辑）"
+          style={undoBtnStyle(true)}
+          aria-label="从分镜重新初始化"
+        >
+          ⟳ 从分镜重新初始化
+        </button>
+      </div>
+
       {/* 上半部分：素材面板 + 播放器 + 属性面板 */}
       <div className={styles.upper}>
         {/* 素材面板 */}
