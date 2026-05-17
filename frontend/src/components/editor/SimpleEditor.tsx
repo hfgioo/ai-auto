@@ -126,7 +126,11 @@ function shotsToTracks(shots: Shot[]): Track[] {
       });
     }
 
-    if (shot.dialogue) {
+    // 字幕：优先用 scriptLines（推文化后写入的字幕行），缺失时回退到旧 dialogue 字段。
+    // shot.dialogue 是早期数据模型遗留，现役分镜流水线用 scriptLines 承载字幕内容；
+    // shotsToTracks 之前只读 dialogue，会造成"字幕轨为空 / 与视频内容对不上"。
+    const subtitleText = (getShotScriptText(shot) || shot.dialogue || '').trim();
+    if (subtitleText) {
       textTrack.clips.push({
         id: `text-${shot.id}`,
         assetId: `text-asset-${shot.id}`,
@@ -134,9 +138,9 @@ function shotsToTracks(shots: Shot[]): Track[] {
         start: currentTime,
         duration: shotDuration,
         offset: 0,
-        name: shot.dialogue.slice(0, 10),
+        name: subtitleText.slice(0, 10),
         type: MediaType.TEXT,
-        src: shot.dialogue,
+        src: subtitleText,
         x: 0, y: 0, scale: 1, rotation: 0, opacity: 1,
       });
     }
@@ -223,6 +227,23 @@ export function syncShotSelectionsIntoTracks(tracks: Track[], shots: Shot[]): Tr
           src: selection.src,
           sourceDuration: selection.duration,
           name: clip.name || selection.name,
+        };
+      }
+
+      if (clip.id.startsWith('text-')) {
+        // 字幕同步：从 scriptLines 拼回纯文本，回退 dialogue。clip 旧 src 与新值不同时更新。
+        const shotId = clip.id.slice('text-'.length);
+        const shot = shotById.get(shotId);
+        if (!shot) return clip;
+        const nextText = (getShotScriptText(shot) || shot.dialogue || '').trim();
+        if (!nextText) return clip;
+        if (clip.src === nextText) return clip;
+        trackChanged = true;
+        changed = true;
+        return {
+          ...clip,
+          src: nextText,
+          name: nextText.slice(0, 10),
         };
       }
 
