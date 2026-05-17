@@ -157,7 +157,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     const handleError = (_: any, data: StreamErrorEvent) => {
       if (data.sessionId !== currentSessionIdRef.current) return;
 
-      const err = new Error(data.error.message);
+      const rawMessage = data?.error?.message;
+      const err = new Error(typeof rawMessage === 'string' && rawMessage ? rawMessage : '会话流式响应出错');
       setError(err);
       options.onError?.(err);
 
