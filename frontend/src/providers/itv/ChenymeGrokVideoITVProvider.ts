@@ -397,6 +397,18 @@ export class ChenymeGrokVideoITVProvider implements ITVProvider {
     return { mode: 'async', taskId };
   }
 
+  /**
+   * 拼当前任务的视频内容流 URL。
+   *
+   * chenyme/grok2api 的 GET /v1/videos/{id} 仅返回元数据（id/status/progress/...），
+   * **不返回 url / metadata.url / result_urls 任何字段**；视频本体走 OpenAI Sora 风格
+   * 单独的 content 端点：GET /v1/videos/{id}/content（README "create → query → download"
+   * 三段式中的 download）。任务 status=completed 时直接构造该 URL 即可。
+   */
+  private buildContentUrl(taskId: string): string {
+    return joinUrl(this.getBaseUrl(), `/v1/videos/${encodeURIComponent(taskId)}/content`);
+  }
+
   async getTaskSnapshot(taskId: string): Promise<ProviderTaskSnapshot<ITVResult>> {
     const response = await safeFetch(
       joinUrl(this.getBaseUrl(), `/v1/videos/${encodeURIComponent(taskId)}`),
@@ -431,15 +443,14 @@ export class ChenymeGrokVideoITVProvider implements ITVProvider {
         ? Math.max(0, Math.min(100, Math.round(Number(progressRaw) || 0)))
         : (state === 'succeeded' ? 100 : 0);
 
-    const resultUrl = data.metadata?.url
-      || (Array.isArray(data.metadata?.result_urls) && data.metadata?.result_urls?.[0])
-      || (Array.isArray(data.result_urls) && data.result_urls[0])
-      || undefined;
-
     if (state === 'succeeded') {
-      if (!resultUrl) {
-        return { state: 'failed', progress: 100, error: '任务完成但未返回视频地址' };
-      }
+      // 优先用响应里实际带回的 URL（兼容某些代理/fork 把 video_url 平铺出来），
+      // 否则按 chenyme/grok2api 标准走 /content 端点拼一个鉴权流地址。
+      const resultUrl = (data as Record<string, unknown>).video_url as string | undefined
+        || data.metadata?.url
+        || (Array.isArray(data.metadata?.result_urls) && data.metadata?.result_urls?.[0])
+        || (Array.isArray(data.result_urls) && data.result_urls[0])
+        || this.buildContentUrl(taskId);
       return {
         state: 'succeeded',
         progress: 100,
