@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Tag, Tooltip } from 'antd';
-import { SettingOutlined, UploadOutlined } from '@ant-design/icons';
+import { SettingOutlined, UploadOutlined, RocketOutlined } from '@ant-design/icons';
 import { Film, Users } from 'lucide-react';
 import {
   Project, Episode, EditorStep, EpisodeStepProgress,
@@ -13,8 +13,12 @@ import {
   getEditorStep,
   type EditorStepContext,
 } from '../../workflow/editorStepRegistry';
-import { loadEpisodeAnalysis } from '../../store/projectStore';
+import { loadEpisodeAnalysis, saveEpisode } from '../../store/projectStore';
 import { useTaskTransitions } from '../../hooks';
+import { AutoPipelineSetupModal } from '../storyboard/AutoPipelineSetupModal';
+import { AutoPipelinePanel } from '../storyboard/AutoPipelinePanel';
+import { AutoPipelineRunner } from '../../workflow/autoPipelineRunner';
+import { buildPipelinePhases, type AutoPipelineContext } from '../../workflow/autoPipelinePhases';
 // 副作用 import：把各步骤 Component 注入到 registry
 import './steps';
 
@@ -65,6 +69,11 @@ export const EditorView: React.FC<EditorViewProps> = ({
   // 'script' 步：导入剧本对话框由 ProjectOverview 渲染；EditorView 顶部按钮通过递增信号
   // 触发其打开（避免把 dialog 提到这一层后还要重新搭刷新 EpisodeManager / AssetOverview 的通道）
   const [scriptImportSignal, setScriptImportSignal] = useState(0);
+
+  // 一键自动到剪辑：runner 状态在 EditorView 这层管，配置 Modal + 浮动进度面板都挂这里
+  const [autoSetupOpen, setAutoSetupOpen] = useState(false);
+  const [activeRunner, setActiveRunner] = useState<AutoPipelineRunner | null>(null);
+  const [activePhases, setActivePhases] = useState<ReturnType<typeof buildPipelinePhases>>([]);
 
   // 'script' 步：跟踪当前剧集的解析就绪状态（剧本必须解析过才能进入下一步）
   // 派生顺序：episode.hasAnalysis → 兜底走 loadEpisodeAnalysis 的 completedStages 长度
@@ -151,6 +160,61 @@ export const EditorView: React.FC<EditorViewProps> = ({
     scriptImportSignal,
   };
 
+  // 一键自动到剪辑：先构造 phases，让 SetupModal 知道选项；启动后挂上 runner
+  const buildAutoPipeline = (): {
+    phases: ReturnType<typeof buildPipelinePhases>;
+    pipelineCtx: AutoPipelineContext;
+  } | null => {
+    if (!activeEpisode) return null;
+    const pipelineCtx: AutoPipelineContext = {
+      projectId: activeProject.id,
+      episodeId: activeEpisode.id,
+      episodeName: activeEpisode.title || `剧集 ${activeEpisode.id}`,
+      scriptText,
+      onScriptChange: (next) => onScriptChange?.(next),
+      onMarkScriptReady: async () => {
+        if (!activeEpisode) return;
+        await saveEpisode(activeProject.id, activeEpisode.id, { scriptReady: true });
+        onActiveEpisodeChange?.({ ...activeEpisode, scriptReady: true });
+      },
+      appSettings,
+      llmSelection,
+      ttiSelection,
+      itvSelection,
+      ttsSelection,
+      styleSnapshot: styleSnapshot as Record<string, unknown> | undefined,
+      projectStylePrompt: activeProject.stylePrompt,
+      aspectRatio: activeProject.aspectRatio,
+      onJumpToVideoStep: () => onStepChange('video'),
+    };
+    return { phases: buildPipelinePhases(pipelineCtx), pipelineCtx };
+  };
+
+  const handleOpenAutoSetup = () => {
+    setAutoSetupOpen(true);
+  };
+
+  const handleStartAutoPipeline = (enabledIds: Set<string>) => {
+    const built = buildAutoPipeline();
+    if (!built) return;
+    setAutoSetupOpen(false);
+    const runner = new AutoPipelineRunner({
+      phases: built.phases,
+      enabledPhaseIds: enabledIds,
+    });
+    setActivePhases(built.phases);
+    setActiveRunner(runner);
+    runner.start().catch(err => {
+      // 中止时 start 会 reject，state.status 已经是 aborted，由面板自己处理 UI
+      console.warn('[AutoPipeline] runner ended with error', err);
+    });
+  };
+
+  const handleClosePanel = () => {
+    setActiveRunner(null);
+    setActivePhases([]);
+  };
+
   // 数据驱动：从 registry 取当前 step 的 Component
   const stepDef = getEditorStep(editorStep);
   const StepComponent = stepDef?.Component;
@@ -180,16 +244,30 @@ export const EditorView: React.FC<EditorViewProps> = ({
           <>
             {getActionButton()}
             {editorStep === 'script' && (
-              <Tooltip title="导入完整剧本并 AI 自动分集（会替换项目中所有剧集）">
-                <Button
-                  size="small"
-                  icon={<UploadOutlined />}
-                  onClick={() => setScriptImportSignal((s) => s + 1)}
-                  className="!text-text-secondary !border-border !bg-bg-elevated hover:!text-status-info hover:!border-status-info"
-                >
-                  导入剧本
-                </Button>
-              </Tooltip>
+              <>
+                <Tooltip title="导入完整剧本并 AI 自动分集（会替换项目中所有剧集）">
+                  <Button
+                    size="small"
+                    icon={<UploadOutlined />}
+                    onClick={() => setScriptImportSignal((s) => s + 1)}
+                    className="!text-text-secondary !border-border !bg-bg-elevated hover:!text-status-info hover:!border-status-info"
+                  >
+                    导入剧本
+                  </Button>
+                </Tooltip>
+                <Tooltip title={activeEpisode ? '一键跑完剧本预处理 → 资产 → 分镜 → 出图 → 出视频，自动进入剪辑步骤' : '请先选择剧集'}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<RocketOutlined />}
+                    disabled={!activeEpisode || !scriptText?.trim()}
+                    onClick={handleOpenAutoSetup}
+                    className="!bg-accent !border-accent hover:!bg-accent-hover hover:!border-accent-hover"
+                  >
+                    一键到剪辑
+                  </Button>
+                </Tooltip>
+              </>
             )}
           </>
         )}
@@ -219,6 +297,27 @@ export const EditorView: React.FC<EditorViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* 一键自动到剪辑：配置 Modal + 浮动进度面板 */}
+      {autoSetupOpen && (() => {
+        const built = buildAutoPipeline();
+        if (!built) return null;
+        return (
+          <AutoPipelineSetupModal
+            open
+            phases={built.phases}
+            onCancel={() => setAutoSetupOpen(false)}
+            onStart={handleStartAutoPipeline}
+          />
+        );
+      })()}
+      {activeRunner && activePhases.length > 0 && (
+        <AutoPipelinePanel
+          runner={activeRunner}
+          phases={activePhases}
+          onClose={handleClosePanel}
+        />
+      )}
     </div>
   );
 };
