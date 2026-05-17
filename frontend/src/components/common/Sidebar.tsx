@@ -75,6 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }));
 
   const bottomNavItems = [
+    { key: 'plugins', icon: <Puzzle size={22} />, label: t('sidebar.plugins') },
     { key: 'settings', icon: <Settings size={22} />, label: t('sidebar.settings') },
   ];
 
