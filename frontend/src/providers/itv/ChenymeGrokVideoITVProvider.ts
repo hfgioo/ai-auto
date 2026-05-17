@@ -352,7 +352,7 @@ export class ChenymeGrokVideoITVProvider implements ITVProvider {
       }
     }
 
-    logger.info('Chenyme grok2api 视频任务创建', {
+    logger.info('Chenyme grok2api 视频任务创建 [v2-multipart-upload]', {
       capability: request.capability,
       model,
       seconds,
@@ -360,6 +360,7 @@ export class ChenymeGrokVideoITVProvider implements ITVProvider {
       resolution_name: resolutionName,
       preset,
       referencesCount: references.length,
+      uploadMode: 'multipart-file',
       body: sanitizeBodyForLog({
         model,
         prompt: String(request.prompt || '').trim(),
