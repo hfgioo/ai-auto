@@ -66,12 +66,13 @@ function undoBtnStyle(enabled: boolean): React.CSSProperties {
 // Shot 转换为 Tracks
 //
 // 时间线为空时由 SimpleEditor 调用，把每个 shot 的"当前选中版本"自动落到 3 条轨道：
-//   video-main：getShotCurrentVideoSource → 没有则降级 image
+//   video-main：getShotCurrentVideoSource → 仅放视频；没视频则空 src 占位（不再用图片兜底）
 //   audio-main：getShotCurrentAudioAsset / Source（配音 wav / mp3）
-//   text-main：shot.dialogue
+//   text-main：scriptLines（推文化后的字幕；若无则回退 shot.dialogue）
 //
 // 三条轨道时间轴对齐 currentTime（按 shot.duration 累加），保证视频 / 音频 / 字幕同步起点。
 // 音频 clip 时长优先用 asset.durationMs（实际 TTS 输出长度），缺失时回退 shot.duration。
+// 图片资源不进任何轨道，仅在分镜板里作为版本参考保留。
 function shotsToTracks(shots: Shot[]): Track[] {
   const videoTrack: Track = { id: 'video-main', type: 'video', clips: [], order: 0, isMainTrack: true };
   const audioTrack: Track = { id: 'audio-main', type: 'audio', clips: [], order: -1 };
@@ -82,25 +83,23 @@ function shotsToTracks(shots: Shot[]): Track[] {
   for (const shot of shots) {
     const shotDuration = shot.duration || 3;
     const videoPath = getShotCurrentVideoSource(shot);
-    const imagePath = getShotCurrentImageSource(shot);
-    const mediaPath = videoPath || imagePath;
-    const mediaType = videoPath ? MediaType.VIDEO : MediaType.IMAGE;
 
-    if (mediaPath) {
-      videoTrack.clips.push({
-        id: `clip-${shot.id}`,
-        assetId: `asset-${shot.id}`,
-        trackId: videoTrack.id,
-        start: currentTime,
-        duration: shotDuration,
-        offset: 0,
-        sourceDuration: shotDuration, // 源素材时长
-        name: getShotScriptText(shot).slice(0, 20) || `镜头 ${shot.id}`,
-        type: mediaType,
-        src: mediaPath,
-        x: 0, y: 0, scale: 1, rotation: 0, opacity: 1,
-      });
-    }
+    // 视频轨规则：仅放视频。有视频 → 真 clip；没视频 → 空 src 占位 clip（保留时间窗口，
+    // 后续视频生成回来后 syncShotSelectionsIntoTracks 会按 shot.id 把 src 填回去）。
+    // 图片资源完全不进时间线，仅作为分镜版本参考保留在分镜板。
+    videoTrack.clips.push({
+      id: `clip-${shot.id}`,
+      assetId: `asset-${shot.id}`,
+      trackId: videoTrack.id,
+      start: currentTime,
+      duration: shotDuration,
+      offset: 0,
+      sourceDuration: shotDuration,
+      name: getShotScriptText(shot).slice(0, 20) || `镜头 ${shot.id}`,
+      type: MediaType.VIDEO,
+      src: videoPath || '',
+      x: 0, y: 0, scale: 1, rotation: 0, opacity: 1,
+    });
 
     // 配音：从选中的音频版本生成 audio clip。durationMs 优先（TTS 真实长度），
     // 没拿到时按 shot.duration 兜底（与视频同窗口）。clip.start 与视频对齐，
@@ -151,16 +150,14 @@ function shotsToTracks(shots: Shot[]): Track[] {
   return [videoTrack, audioTrack, textTrack].filter(t => t.clips.length > 0 || t.isMainTrack);
 }
 
-function resolveShotVisualSelection(shot: Shot): { src: string; type: MediaType; duration: number; name: string } | null {
+function resolveShotVisualSelection(shot: Shot): { src: string; type: MediaType; duration: number; name: string } {
+  // 仅取视频；没视频时返回 src 为空字符串，让轨道保留空占位 clip 而不是清掉。
+  // 图片不再作为兜底进入时间线（仅在分镜板中作为版本参考）。
   const shotDuration = shot.duration || 3;
   const videoPath = getShotCurrentVideoSource(shot);
-  const imagePath = getShotCurrentImageSource(shot);
-  const src = videoPath || imagePath;
-  if (!src) return null;
-
   return {
-    src,
-    type: videoPath ? MediaType.VIDEO : MediaType.IMAGE,
+    src: videoPath || '',
+    type: MediaType.VIDEO,
     duration: shotDuration,
     name: getShotScriptText(shot).slice(0, 20) || `镜头 ${shot.id}`,
   };

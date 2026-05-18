@@ -242,6 +242,8 @@ export class SimpleVideoRenderer {
 
   private preloadMedia(clip: Clip): void {
     if (this.mediaCache.has(clip.id)) return;
+    // 占位 clip（没视频时由 shotsToTracks 留下的空 src）跳过预加载，避免 <video src=""> 报错
+    if (!clip.src || !clip.src.trim()) return;
 
     // 转换为 koma-local:// 协议（toKomaLocalUrl 走固定 host=files，避免 GURL 把 path 第一段当 host）
     const mediaSrc = toKomaLocalUrl(clip.src);
