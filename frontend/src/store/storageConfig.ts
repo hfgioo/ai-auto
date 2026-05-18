@@ -7,14 +7,14 @@ import type { StorageConfig } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 
 const STORAGE_VERSION = 1;
-const DEFAULT_FOLDER_NAME = '.koma';
 
 // 获取默认存储路径
+// 通过主进程 IPC 拿"业务根"（Windows 安装版默认 <安装盘>:\.koma\，dev/受限路径退回 ~/.koma）
+// 与 main 端 paths.ts:resolveBusinessRoot 单源真相对齐
 export async function getDefaultStoragePath(): Promise<string> {
   if (electronService.isElectron()) {
-    const home = await electronService.app.getPath('home');
-    const path = `${home}/${DEFAULT_FOLDER_NAME}`;
-    return path;
+    const root = await electronService.app.getBusinessRoot();
+    return root;
   }
   // 浏览器环境：使用 IndexedDB 或 localStorage（返回空路径表示内存存储）
   return '';

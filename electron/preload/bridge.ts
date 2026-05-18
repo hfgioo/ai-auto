@@ -45,6 +45,8 @@ const ALLOWED_INVOKE_CHANNELS = new Set([
   'controller/diagnostics/clearRendererLogs', 'controller/diagnostics/exportLogs',
   'controller/app/openExternal', 'controller/app/showItemInFolder',
   'controller/app/getPath', 'controller/app/getVersion',
+  'controller/app/getBusinessRoot',
+  'controller/app/checkLegacyDataMigration',
   // 风格参考图（"画风锚"）：全局上传/清除 + 项目级上传/清除 + 路径解析
   'controller/app/getStyleReferenceImagePath',
   'controller/app/getKomaTTSVoiceSamplePath',
@@ -231,6 +233,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     getPath: (name: string) => invokeMain('controller/app/getPath', { name }),
     getVersion: () => invokeMain('controller/app/getVersion', {}),
+    getBusinessRoot: () => invokeMain('controller/app/getBusinessRoot', {}),
+    checkLegacyDataMigration: () => invokeMain('controller/app/checkLegacyDataMigration', {}),
   },
   // 渲染进程读取 File 绝对路径的官方 API（Electron 32+ 已移除 File.path 扩展）
   webUtils: {

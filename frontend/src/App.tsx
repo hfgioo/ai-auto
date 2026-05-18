@@ -35,6 +35,7 @@ import { getThumbnailUrl } from './constants/dimensions';
 import { createLogger } from './store/logger';
 import { loadSettings } from './store/globalStore';
 import { listEditorStepIds } from './workflow/editorStepRegistry';
+import { electronService } from './services/electronService';
 import { resolveConfiguredChannelModel, serializeMediaSelection } from './providers/channel/resolver';
 import {
   getDurationSpecForModel,
@@ -102,6 +103,7 @@ function isDisplayableProject(project: unknown): project is NonNullable<ReturnTy
 
 const AppContent: React.FC = () => {
   const { message } = AntApp.useApp();
+  const { modal } = AntApp.useApp();
 
   // 开发模式检测
   const urlParams = new URLSearchParams(window.location.search);
@@ -166,6 +168,53 @@ const AppContent: React.FC = () => {
     registerMediaPollFulfillers();
     registerAnalysisFulfillers();
   }, []);
+
+  // 启动时检测旧 ~/.koma 数据是否需要迁移到新业务根（Windows 安装版改了路径才需要）
+  // 仅提示一次：本会话内已询问过就不再问。用户选"忽略"则永久跳过（写 localStorage flag）
+  useEffect(() => {
+    if (!electronService.isElectron()) return;
+    const SKIP_KEY = 'koma:skipLegacyDataMigration';
+    if (localStorage.getItem(SKIP_KEY) === '1') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await electronService.app.checkLegacyDataMigration();
+        if (cancelled || !info.needsMigration) return;
+        modal.confirm({
+          title: '检测到旧版本数据',
+          content: (
+            <div>
+              <div style={{ marginBottom: 8 }}>
+                你的旧数据在：<code style={{ background: 'var(--token-bg-elevated)', padding: '1px 4px', borderRadius: 3 }}>{info.oldPath}</code>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                新数据目录在：<code style={{ background: 'var(--token-bg-elevated)', padding: '1px 4px', borderRadius: 3 }}>{info.newPath}</code>
+              </div>
+              <div style={{ color: 'var(--token-text-secondary)' }}>
+                这次更新后数据存放位置变了。新位置是空的，旧数据保留在原位。
+                你可以手动把旧目录里的内容（projects/ settings.db plugins-runtime/ 等）整个拷贝到新目录。
+              </div>
+              <div style={{ marginTop: 8, color: 'var(--token-status-warning)', fontSize: 12 }}>
+                注意：settings.db 里 apiKey 是按当前 Windows 用户加密的，跨用户复制后需要重新填。
+              </div>
+            </div>
+          ),
+          okText: '我知道了',
+          cancelText: '不再提示',
+          onOk: () => undefined,
+          onCancel: () => {
+            localStorage.setItem(SKIP_KEY, '1');
+          },
+        });
+      } catch (err) {
+        logger.warn('checkLegacyDataMigration failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [modal]);
 
   // 初始化 TaskManager，并同步当前项目上下文
   useEffect(() => {

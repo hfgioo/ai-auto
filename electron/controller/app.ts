@@ -22,6 +22,60 @@ class AppController extends BaseController {
     return { path: pathValue };
   }
 
+  /**
+   * 业务根目录（默认 <安装盘>:\.koma\，受限路径或 dev/mac/linux 退回 ~/.koma）。
+   * 前端 storageConfig 取默认存储路径时调用本接口，避免与主进程不一致。
+   */
+  getBusinessRoot() {
+    return { path: getBusinessRoot() };
+  }
+
+  /**
+   * 检测旧 ~/.koma 是否存在且非空、且当前业务根 ≠ 旧 home/.koma 路径，
+   * 用于启动时提示用户"是否迁移到新路径"。
+   *
+   * 返回 { needsMigration: boolean, oldPath, newPath, hasContent }。
+   * - hasContent：旧目录是否有实质内容（projects/ 或 settings.db 任一存在）
+   * - needsMigration：true 仅当 ①hasContent ②oldPath ≠ newPath ③newPath 不存在或为空
+   */
+  checkLegacyDataMigration() {
+    const oldPath = path.join(app.getPath('home'), '.koma');
+    const newPath = getBusinessRoot();
+    if (path.resolve(oldPath) === path.resolve(newPath)) {
+      return { needsMigration: false, oldPath, newPath, hasContent: false };
+    }
+    let hasContent = false;
+    try {
+      const projectsDir = path.join(oldPath, 'projects');
+      const settingsDb = path.join(oldPath, 'settings.db');
+      if (fs.existsSync(projectsDir)) {
+        const entries = fs.readdirSync(projectsDir).filter(name => !name.startsWith('.'));
+        if (entries.length > 0) hasContent = true;
+      }
+      if (!hasContent && fs.existsSync(settingsDb)) {
+        const stat = fs.statSync(settingsDb);
+        if (stat.size > 0) hasContent = true;
+      }
+    } catch {
+      // 旧路径不存在或无权访问 → 当作无内容
+    }
+    let newPathHasContent = false;
+    try {
+      if (fs.existsSync(newPath)) {
+        const entries = fs.readdirSync(newPath).filter(name => !name.startsWith('.') && name !== '_userData');
+        if (entries.length > 0) newPathHasContent = true;
+      }
+    } catch {
+      // 新路径不可读，按"无内容"处理（后续会自动 mkdir）
+    }
+    return {
+      needsMigration: hasContent && !newPathHasContent,
+      oldPath,
+      newPath,
+      hasContent,
+    };
+  }
+
   getVersion() {
     return { version: app.getVersion() };
   }

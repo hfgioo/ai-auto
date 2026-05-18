@@ -4,7 +4,7 @@ import * as path from 'path';
 import archiver from 'archiver';
 import { app } from 'electron';
 import { logger as mainLogger } from 'ee-core/log';
-import { getBusinessLogsDir } from './paths';
+import { getBusinessLogsDir, getBusinessRoot } from './paths';
 
 export type DiagnosticsLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -59,7 +59,7 @@ const SENSITIVE_KEY_PATTERN = /(api[-_]?key|authorization|bearer|token|password|
 
 function normalizeRootPath(rootPath: string): string {
   const value = String(rootPath || '').trim();
-  return value ? path.resolve(value) : path.resolve(app.getPath('home'), '.koma');
+  return value ? path.resolve(value) : path.resolve(getBusinessRoot());
 }
 
 function ensureZipPath(destPath: string): string {
@@ -152,7 +152,7 @@ function assertExportPathAllowed(filePath: string): void {
     app.getPath('desktop'),
     app.getPath('documents'),
     app.getPath('downloads'),
-    path.join(app.getPath('home'), '.koma'),
+    getBusinessRoot(),
   ].map(root => path.resolve(root));
   if (!roots.some(root => isInside(root, normalized))) {
     throw new Error('Export path is outside allowed directories');

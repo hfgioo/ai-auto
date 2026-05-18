@@ -9,6 +9,7 @@ import { app, net as electronNet } from 'electron';
 import { BaseController } from './base';
 import { validateUrl } from '../service/url-validator';
 import { getDecryptedApiKey } from '../service/settings/ChannelConfigService';
+import { getBusinessRoot } from '../service/paths';
 
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
@@ -18,8 +19,8 @@ function isPathAllowed(filePath: string): boolean {
   const appData = app.getPath('appData');
   const userData = app.getPath('userData');
   const temp = app.getPath('temp');
-  // 业务根（~/.koma）与 userData 已分离，必须显式加进允许列表
-  const businessRoot = path.join(home, '.koma');
+  // 业务根（默认 <安装盘>:\.koma\ 或 ~/.koma）与 userData 已分离，必须显式加进允许列表
+  const businessRoot = getBusinessRoot();
   const allowedRoots = [home, appData, userData, temp, businessRoot];
   return allowedRoots.some(root => normalized.startsWith(root + path.sep) || normalized === root);
 }

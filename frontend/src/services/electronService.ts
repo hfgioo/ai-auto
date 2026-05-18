@@ -56,6 +56,13 @@ interface ElectronAPI {
   app: {
     getPath: (name: string) => Promise<string | { path: string }>;
     getVersion: () => Promise<string | { version: string }>;
+    getBusinessRoot?: () => Promise<string | { path: string }>;
+    checkLegacyDataMigration?: () => Promise<{
+      needsMigration: boolean;
+      oldPath: string;
+      newPath: string;
+      hasContent: boolean;
+    }>;
   };
   diagnostics?: {
     appendRendererLog: (payload: DiagnosticsRendererLogPayload) => Promise<{ success: boolean }>;
@@ -600,6 +607,48 @@ export const appGetVersion = async (): Promise<string> => {
   return '0.0.0';
 };
 
+/**
+ * 取主进程业务根目录（Windows 安装版默认 <安装盘>:\.koma\，dev/受限路径退回 ~/.koma）。
+ * 旧版主进程（无该 IPC）会拒绝调用，这里 catch 回退到 home/.koma 让前端不崩。
+ */
+export const appGetBusinessRoot = async (): Promise<string> => {
+  const api = getElectronAPI();
+  if (api?.app?.getBusinessRoot) {
+    try {
+      const result = await api.app.getBusinessRoot();
+      const path = typeof result === 'object' && result !== null && 'path' in result
+        ? (result as { path: string }).path
+        : (result as string);
+      return normalizePath(path);
+    } catch {
+      // fall through to legacy path
+    }
+  }
+  // 旧主进程兼容：home/.koma
+  const home = await appGetPath('home');
+  return normalizePath(`${home}/.koma`);
+};
+
+/**
+ * 检查是否需要从旧 ~/.koma 迁移数据到新业务根。旧主进程无该 IPC 时返回 needsMigration=false。
+ */
+export const appCheckLegacyDataMigration = async (): Promise<{
+  needsMigration: boolean;
+  oldPath: string;
+  newPath: string;
+  hasContent: boolean;
+}> => {
+  const api = getElectronAPI();
+  if (api?.app?.checkLegacyDataMigration) {
+    try {
+      return await api.app.checkLegacyDataMigration();
+    } catch {
+      // fall through
+    }
+  }
+  return { needsMigration: false, oldPath: '', newPath: '', hasContent: false };
+};
+
 // ========== 诊断日志 ==========
 
 export const diagnosticsAppendRendererLog = async (
@@ -1018,6 +1067,8 @@ export const electronService = {
   app: {
     getPath: appGetPath,
     getVersion: appGetVersion,
+    getBusinessRoot: appGetBusinessRoot,
+    checkLegacyDataMigration: appCheckLegacyDataMigration,
   },
   diagnostics: {
     appendRendererLog: diagnosticsAppendRendererLog,
