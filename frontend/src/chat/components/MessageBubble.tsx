@@ -4,6 +4,7 @@
 import React, { useState, useMemo } from 'react';
 import { Avatar, Typography, Button, Tooltip, Image as AntImage } from 'antd';
 import { UserOutlined, RobotOutlined, CopyOutlined, ReloadOutlined, DownOutlined, RightOutlined, FileOutlined, CloseOutlined } from '@ant-design/icons';
+import { Markdown } from 'ds-markdown';
 import type { ChatMessage, ToolCall, ImageContentPart, FileContentPart, VideoContentPart, ContentPart } from '../types';
 import { normalizeMessage } from '../utils/messageUtils';
 import { MediaResultBlock } from '../../components/chat/MediaResultBlock';
@@ -14,26 +15,26 @@ const { Text } = Typography;
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  mdTheme: 'light' | 'dark';
   onRetry?: (messageId: string) => void;
   onCopy?: (content: string) => void;
   renderAvatar?: (role: string) => React.ReactNode;
   renderToolCall?: (toolCall: ToolCall) => React.ReactNode;
-  renderContent: (content: string) => React.ReactNode;
-  onRemoveContentPart?: (partIndex: number) => void;
-  /** 媒体结果卡片专用回调（仅当 message.metadata.mediaResult 存在时生效） */
-  onMediaReedit?: () => void;
-  onMediaRegenerate?: () => void;
-  onMediaDelete?: () => void;
-  onMediaUseAsReference?: (images: import('../../components/chat/chatMediaGeneration').ChatImageRef[]) => void;
+  /** messageId 作为第一个参数，方便本组件用 React.memo 时把回调原样透传（不用每条消息各建一个闭包） */
+  onRemoveContentPart?: (messageId: string, partIndex: number) => void;
+  onMediaReedit?: (messageId: string) => void;
+  onMediaRegenerate?: (messageId: string) => void;
+  onMediaDelete?: (messageId: string) => void;
+  onMediaUseAsReference?: (messageId: string, images: import('../../components/chat/chatMediaGeneration').ChatImageRef[]) => void;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubbleImpl: React.FC<MessageBubbleProps> = ({
   message,
+  mdTheme,
   onRetry,
   onCopy,
   renderAvatar,
   renderToolCall,
-  renderContent,
   onRemoveContentPart,
   onMediaReedit,
   onMediaRegenerate,
@@ -112,10 +113,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div className={styles.messageContent}>
           <MediaResultBlock
             meta={mediaResult}
-            onReedit={onMediaReedit}
-            onRegenerate={onMediaRegenerate}
-            onDelete={onMediaDelete}
-            onUseAsReference={onMediaUseAsReference}
+            onReedit={onMediaReedit ? () => onMediaReedit(message.id) : undefined}
+            onRegenerate={onMediaRegenerate ? () => onMediaRegenerate(message.id) : undefined}
+            onDelete={onMediaDelete ? () => onMediaDelete(message.id) : undefined}
+            onUseAsReference={onMediaUseAsReference ? (images) => onMediaUseAsReference(message.id, images) : undefined}
           />
         </div>
       </div>
@@ -147,7 +148,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               )}
             </div>
           )}
-          {displayContent && renderContent(displayContent)}
+          {displayContent && (
+            isUser
+              ? <span>{displayContent}</span>
+              : <Markdown interval={0} disableTyping theme={mdTheme}>{displayContent}</Markdown>
+          )}
 
           {imageParts.length > 0 && (
             <div className={styles.attachmentImages}>
@@ -166,7 +171,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       <button
                         type="button"
                         className={styles.attachmentRemove}
-                        onClick={() => onRemoveContentPart(index)}
+                        onClick={() => onRemoveContentPart(message.id, index)}
                         aria-label="删除"
                       >
                         <CloseOutlined />
@@ -192,7 +197,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <button
                       type="button"
                       className={styles.attachmentRemove}
-                      onClick={() => onRemoveContentPart(index)}
+                      onClick={() => onRemoveContentPart(message.id, index)}
                       aria-label="删除"
                     >
                       <CloseOutlined />
@@ -213,7 +218,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <button
                       type="button"
                       className={styles.attachmentRemoveInline}
-                      onClick={() => onRemoveContentPart(index)}
+                      onClick={() => onRemoveContentPart(message.id, index)}
                       aria-label="删除"
                     >
                       <CloseOutlined />
@@ -268,3 +273,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     </div>
   );
 };
+
+// 流式回复期间父级 streamingContent 每个 token 都会变，导致 ChatRenderer 整体重渲染；
+// 用 memo 挡住那些内容和回调引用都没变的历史消息，避免消息越多、流式打字时越卡。
+export const MessageBubble = React.memo(MessageBubbleImpl);

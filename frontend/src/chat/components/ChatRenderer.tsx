@@ -110,15 +110,6 @@ export const ChatRenderer: React.FC<ChatRendererProps> = ({
     }
   }, [messages, streamingContent, streamingReasoning]);
 
-  const renderMarkdownContent = (content: string, isUser: boolean) => {
-    if (!content) return null;
-    // 用户消息直接显示文本，助手消息使用 Markdown 渲染
-    if (isUser) {
-      return <span>{content}</span>;
-    }
-    return <Markdown interval={0} disableTyping theme={mdTheme}>{content}</Markdown>;
-  };
-
   if (messages.length === 0 && !streaming) {
     return <EmptyState text={emptyText} />;
   }
@@ -129,16 +120,16 @@ export const ChatRenderer: React.FC<ChatRendererProps> = ({
         <MessageBubble
           key={msg.id}
           message={msg}
+          mdTheme={mdTheme}
           onRetry={onRetry}
           onCopy={onCopy}
           renderAvatar={renderAvatar}
           renderToolCall={renderToolCall}
-          renderContent={(content) => renderMarkdownContent(content, msg.role === 'user')}
-          onRemoveContentPart={onRemoveContentPart ? (partIndex) => onRemoveContentPart(msg.id, partIndex) : undefined}
-          onMediaReedit={onMediaReedit ? () => onMediaReedit(msg.id) : undefined}
-          onMediaRegenerate={onMediaRegenerate ? () => onMediaRegenerate(msg.id) : undefined}
-          onMediaDelete={onMediaDelete ? () => onMediaDelete(msg.id) : undefined}
-          onMediaUseAsReference={onMediaUseAsReference ? (imgs) => onMediaUseAsReference(msg.id, imgs) : undefined}
+          onRemoveContentPart={onRemoveContentPart}
+          onMediaReedit={onMediaReedit}
+          onMediaRegenerate={onMediaRegenerate}
+          onMediaDelete={onMediaDelete}
+          onMediaUseAsReference={onMediaUseAsReference}
         />
       ))}
 

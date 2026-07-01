@@ -238,14 +238,16 @@ export const ChatPage: React.FC = () => {
   }, []);
 
   // 历史存储（提前到 polling/handleSend 之前，让所有 callback 闭包能拿到 currentSessionId）
-  const {
-    loadMessages: loadHistoryMessages,
-    saveMessages,
-    createSession: createHistorySession,
-    currentSessionId,
-    setCurrentSession,
-    loadSessions: reloadSessionsList,
-  } = useChatHistoryStore();
+  //
+  // 逐字段选择而非整店订阅：这里不读 sessions，如果整店订阅，saveMessages 每次完成
+  // 一轮对话都会更新 sessions 列表，进而让 ChatPage（承载整个消息列表 + 输入框的大组件）
+  // 跟着重渲染一次——历史越多，这种无意义重渲染越频繁。
+  const loadHistoryMessages = useChatHistoryStore(state => state.loadMessages);
+  const saveMessages = useChatHistoryStore(state => state.saveMessages);
+  const createHistorySession = useChatHistoryStore(state => state.createSession);
+  const currentSessionId = useChatHistoryStore(state => state.currentSessionId);
+  const setCurrentSession = useChatHistoryStore(state => state.setCurrentSession);
+  const reloadSessionsList = useChatHistoryStore(state => state.loadSessions);
 
   // 用 ref 把 handleSend 暴露给前面定义的 handleMediaRegenerate（避免循环依赖）
   const handleSendRef = useRef<((text: string, mode?: ChatMediaMode, mediaParams?: ChatMediaParams) => Promise<void>) | null>(null);
