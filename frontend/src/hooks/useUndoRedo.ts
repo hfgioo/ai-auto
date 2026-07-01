@@ -13,7 +13,11 @@
  *   const [state, { set, commit, undo, redo, canUndo, canRedo, reset }] = useUndoRedo(initialState);
  *
  *   set(next)      —— 改 state，**不入栈**（拖拽中用）
- *   commit(next)   —— 改 state，**入栈**
+ *   commit(next)   —— 改 state，**入栈**（入栈的"上一笔"是调用时的当前 state）
+ *   commitFrom(baseline, next) —— 改 state，把指定的 baseline（而非调用时的当前 state）入栈。
+ *                        用于"拖拽中一直 set()，松手后一次性入栈"场景：拖拽期间 state 已经被
+ *                        set() 改到了拖动后的位置，此时如果 commit() 仍读当前 state 当作历史
+ *                        起点，会把"拖动后的位置"错误地当成"拖动前"存进历史，导致 undo 失效。
  *   undo()         —— 回退到上一笔（无历史时无操作）
  *   redo()         —— 前进到下一笔
  *   reset(next)    —— 清空历史栈，重置为某状态
@@ -28,6 +32,8 @@ export interface UndoRedoApi<T> {
   set: (next: T | ((prev: T) => T)) => void;
   /** 入栈地更新（结束态调用） */
   commit: (next: T | ((prev: T) => T)) => void;
+  /** 用指定 baseline 入栈（拖拽等"中间态已用 set() 改过当前 state"的场景专用） */
+  commitFrom: (baseline: T, next: T | ((prev: T) => T)) => void;
   /** 回退；返回是否成功 */
   undo: () => boolean;
   /** 前进；返回是否成功 */
@@ -70,6 +76,22 @@ export function useUndoRedo<T>(initial: T): [T, UndoRedoApi<T>] {
     });
   }, []);
 
+  const commitFrom = useCallback((baseline: T, next: T | ((prev: T) => T)) => {
+    setState(prev => {
+      const resolved = resolve(next, prev);
+      // 与 baseline（而非 prev）比较：prev 可能已经被拖拽中的 set() 改过，
+      // 只有结果和"拖拽前"的 baseline 一致才算真的没变化。
+      if (resolved === baseline) return resolved;
+      pastRef.current.push(baseline);
+      if (pastRef.current.length > MAX_HISTORY) {
+        pastRef.current.shift();
+      }
+      futureRef.current = [];
+      forceTick(t => t + 1);
+      return resolved;
+    });
+  }, []);
+
   const undo = useCallback((): boolean => {
     if (pastRef.current.length === 0) return false;
     setState(prev => {
@@ -108,6 +130,7 @@ export function useUndoRedo<T>(initial: T): [T, UndoRedoApi<T>] {
   return [state, {
     set,
     commit,
+    commitFrom,
     undo,
     redo,
     canUndo: pastRef.current.length > 0,

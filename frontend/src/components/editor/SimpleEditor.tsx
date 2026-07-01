@@ -233,7 +233,6 @@ export function syncShotSelectionsIntoTracks(tracks: Track[], shots: Shot[]): Tr
         const shot = shotById.get(shotId);
         if (!shot) return clip;
         const nextText = (getShotScriptText(shot) || shot.dialogue || '').trim();
-        if (!nextText) return clip;
         if (clip.src === nextText) return clip;
         trackChanged = true;
         changed = true;
@@ -258,6 +257,7 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
   const [tracks, tracksApi] = useUndoRedo<Track[]>([]);
   const setTracks = tracksApi.set;     // 不入栈（用于初始化、拖动中）
   const commitTracks = tracksApi.commit;  // 入栈（用于结束态、增删等离散操作）
+  const commitTracksFrom = tracksApi.commitFrom;  // 入栈，但历史起点用调用方给的 baseline（拖动结束专用）
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -271,6 +271,11 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
   const timelineCreatedAtRef = useRef<number>(Date.now());
 
   const isDraggingRef = useRef(false);
+  // 拖动过程中 tracks 一直在变（set() 不入栈），需要一份"拖动前"的快照供松手时入栈用，
+  // 否则 commit 读到的当前 state 已经是拖动后的位置，undo 会失效。
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  const dragBaselineRef = useRef<Track[] | null>(null);
 
   /**
    * 统一更新 tracks。
@@ -298,11 +303,20 @@ export const SimpleEditor: React.FC<SimpleEditorProps> = ({ shots = [], projectI
   }, [commitTracks]);
 
   const handleDragStateChange = useCallback((isDragging: boolean) => {
+    if (isDragging) {
+      dragBaselineRef.current = tracksRef.current;
+    }
     isDraggingRef.current = isDragging;
     if (!isDragging) {
-      normalizeNow();
+      const baseline = dragBaselineRef.current;
+      dragBaselineRef.current = null;
+      if (baseline) {
+        commitTracksFrom(baseline, (prev) => normalizeTimelineTracks(prev));
+      } else {
+        normalizeNow();
+      }
     }
-  }, [normalizeNow]);
+  }, [normalizeNow, commitTracksFrom]);
 
   const prevTransitionCountRef = useRef<number>(0);
   const isUserDeletingRef = useRef(false);
