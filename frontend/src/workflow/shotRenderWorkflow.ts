@@ -29,12 +29,14 @@ import {
 } from '../services/ShotPromptService';
 import { normalizeProjectNarrativeMode } from '../services/narrativeMode';
 import {
+  applyPreviousRenderedFrameAnchor,
   collectShotVideoPlan,
   resolveShotVideoCapabilitySupport,
 } from './shotVideoPlan';
 import { compileShotVideoGenerationRequest } from './videoGenerationRequests';
 import { resolveConfiguredChannelModel } from '../providers/channel/resolver';
 import { getModelMaxReferenceImages } from '../providers/itv/modelCatalog';
+import { ffmpegManager } from '../services/ffmpegManager';
 import type { StyleSnapshotLike } from '../utils/promptNormalize';
 import { normalizeVideoDurationSeconds } from '../utils/videoDuration';
 import { clampDurationToSpec, getDurationSpecForITVSelection } from '../providers/itv/durationSpec';
@@ -167,7 +169,7 @@ export async function shotRenderWorkflow(
       selectedItvContext?.model,
       selectedItvContext?.channelConfig.providerType,
     );
-    const resolvedVideoPlan = collectShotVideoPlan({
+    let resolvedVideoPlan = collectShotVideoPlan({
       shot: normalizedShot,
       characters,
       scenes: projectScenes,
@@ -176,6 +178,36 @@ export async function shotRenderWorkflow(
       modelCapabilities: selectedItvModelCapabilities,
       modelMaxRefs: selectedItvModelMaxRefs,
     });
+
+    // 用上一分镜视频真实渲染出的末帧顶替设计阶段的静态锚点，解决"每段视频衔接不上"的问题。
+    // 全程 best-effort：拿不到上一镜头视频 / ffmpeg 不可用 / 抽帧失败都不影响本镜头正常生成。
+    try {
+      const currentIndex = episodeShots?.findIndex(s => s.id === normalizedShot.id) ?? -1;
+      const previousShot = currentIndex > 0 ? episodeShots?.[currentIndex - 1] : undefined;
+      const previousMedia = previousShot ? normalizeShotMediaState(previousShot).media : undefined;
+      const previousVideoIndex = previousMedia?.currentVideoIndex ?? (previousMedia?.videos?.length ?? 0) - 1;
+      const previousVideoAsset = previousMedia?.videos?.[previousVideoIndex];
+      if (previousShot && previousVideoAsset?.localPath) {
+        const lastFramePath = await ffmpegManager.getLastFrame(
+          previousVideoAsset.localPath,
+          `${previousShot.id}-lastframe`,
+        );
+        if (lastFramePath) {
+          resolvedVideoPlan = applyPreviousRenderedFrameAnchor(resolvedVideoPlan, lastFramePath);
+          logger.info('已应用上一分镜真实末帧作为续接锚点', {
+            shotId: normalizedShot.id,
+            previousShotId: previousShot.id,
+            lastFramePath,
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn('提取/应用上一分镜末帧续接锚点失败，跳过', {
+        shotId: normalizedShot.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     const capabilitySupport = settings
       ? resolveShotVideoCapabilitySupport({
           settings,

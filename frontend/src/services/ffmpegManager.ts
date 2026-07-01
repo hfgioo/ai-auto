@@ -105,6 +105,7 @@ const getFFmpegAPI = (): any => {
 class FFmpegManager {
   private frameCache: Map<string, string[]> = new Map();
   private posterFrameCache: Map<string, string> = new Map();
+  private lastFrameCache: Map<string, string> = new Map();
   private waveformCache: Map<string, string> = new Map();
   private mediaInfoCache: Map<string, MediaInfo> = new Map();
   private cacheDir: string = '';
@@ -243,6 +244,63 @@ class FFmpegManager {
       this.posterFrameCache.set(cacheKey, firstFrame);
     }
     return firstFrame;
+  }
+
+  /**
+   * 提取视频尾帧（末帧），用于分镜续接续镜的连续性锚点。
+   * 与 getPosterFrame 对称：先取媒体时长，再在结尾前 0.15s 处抽帧，
+   * 避免正好落在最后一帧之外导致抽帧失败。
+   */
+  async getLastFrame(
+    filePath: string,
+    resourceId: string,
+    width: number = 320
+  ): Promise<string | null> {
+    const cacheKey = `${filePath}:${resourceId}:${width}:lastframe`;
+    if (this.lastFrameCache.has(cacheKey)) {
+      return this.lastFrameCache.get(cacheKey)!;
+    }
+
+    await this.init();
+    const api = getFFmpegAPI();
+    if (!api) {
+      return null;
+    }
+
+    const available = await this.isAvailable();
+    if (!available) {
+      return null;
+    }
+
+    try {
+      const mediaInfo = await this.getMediaInfo(filePath);
+      const durationSec = (mediaInfo.duration || 0) / 1000;
+      if (!durationSec) return null;
+
+      const rootDir = await api.getCacheDir('video-last-frames');
+      const outputDir = `${rootDir}/${resourceId}`;
+      await api.ensureDir(outputDir);
+
+      const startTime = Math.max(0, durationSec - 0.15);
+      const frames = await api.extractFrames({
+        input: filePath,
+        outputDir,
+        fps: 1,
+        startTime,
+        endTime: durationSec,
+        width,
+        quality: 2,
+      });
+
+      const lastFrame = Array.isArray(frames) && frames.length > 0 ? frames[frames.length - 1] : null;
+      if (lastFrame) {
+        this.lastFrameCache.set(cacheKey, lastFrame);
+      }
+      return lastFrame;
+    } catch (err) {
+      logger.warn('提取视频尾帧失败:', err);
+      return null;
+    }
   }
 
   /**

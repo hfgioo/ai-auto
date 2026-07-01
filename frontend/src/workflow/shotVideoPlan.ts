@@ -137,6 +137,55 @@ export function collectShotVideoPlan(params: {
   };
 }
 
+/**
+ * 用上一分镜视频真实渲染出的末帧覆盖/补齐当前 plan 的锚点。
+ *
+ * 背景：bundle 里的锚点（shot-anchor/grid-anchor/storyboard-anchor）都是设计阶段的静态图，
+ * 跟视频模型实际演绎出的运镜/动作结果必然会有偏差，导致相邻分镜视频衔接不上。
+ * 这里用"上一镜头真实渲染完的最后一帧"顶替/补强 primaryImageInput，让下一镜头的生成
+ * 有真实画面可续，而不是只靠 prompt 文字要求模型"自己想象"上一镜头结尾。
+ *
+ * 不 mutate 传入的 plan，返回一个新对象。
+ */
+export function applyPreviousRenderedFrameAnchor(
+  plan: ShotVideoPlan,
+  lastFramePath: string,
+): ShotVideoPlan {
+  if (plan.capability === 'video.text-to-video') {
+    return {
+      ...plan,
+      capability: 'video.image-to-video',
+      capabilityLabel: SHOT_VIDEO_CAPABILITY_LABELS['video.image-to-video'],
+      primaryImageInput: lastFramePath,
+      primaryImageSource: lastFramePath,
+      visualReferenceInputs: [lastFramePath],
+    };
+  }
+
+  if (plan.capability === 'video.reference-to-video') {
+    return {
+      ...plan,
+      primaryImageInput: lastFramePath,
+      primaryImageSource: lastFramePath,
+      visualReferenceInputs: [lastFramePath, ...plan.visualReferenceInputs],
+    };
+  }
+
+  // video.image-to-video：已有的设计锚点降级进 additionalReferenceImages（保留风格/人物一致性参考），
+  // 真实末帧顶替为 primaryImageInput。
+  const demotedAnchor = plan.primaryImageInput;
+  const nextAdditional = demotedAnchor
+    ? [demotedAnchor, ...plan.additionalReferenceImages]
+    : plan.additionalReferenceImages;
+  return {
+    ...plan,
+    primaryImageInput: lastFramePath,
+    primaryImageSource: lastFramePath,
+    additionalReferenceImages: nextAdditional,
+    visualReferenceInputs: [lastFramePath, ...nextAdditional],
+  };
+}
+
 interface RoutedBundle {
   capability: VideoGenerationCapability;
   primaryImageInput?: MediaAssetSource;
