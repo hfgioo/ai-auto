@@ -61,8 +61,12 @@ class AppController extends BaseController {
     }
     let newPathHasContent = false;
     try {
-      if (fs.existsSync(newPath)) {
-        const entries = fs.readdirSync(newPath).filter(name => !name.startsWith('.') && name !== '_userData');
+      // 只认 projects/ 下的真实业务数据；settings.db / logs / _userData 等在
+      // preload 阶段 initServices() 就会自动创建，用它们判断会导致新装用户
+      // "刚启动就判定新路径已有内容"，migration 提示永远不会触发。
+      const projectsDir = path.join(newPath, 'projects');
+      if (fs.existsSync(projectsDir)) {
+        const entries = fs.readdirSync(projectsDir).filter(name => !name.startsWith('.'));
         if (entries.length > 0) newPathHasContent = true;
       }
     } catch {
